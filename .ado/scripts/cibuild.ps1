@@ -111,6 +111,10 @@ function Get-CMakeConfiguration($config) {
     return $val
 }
 
+function Invoke-RemoveUnusedFilesForComponentGovernance() {
+    Remove-Item -Path ".\unsupported\juno" -Force -Recurse
+}
+
 function Invoke-Environment($Command, $arg) {
     $Command = "`"" + $Command + "`" " + $arg
     Write-Host "Running command [ $Command ]"
@@ -384,7 +388,7 @@ function Invoke-PrepareNugetPackage($SourcesPath, $WorkSpacePath, $OutputPath, $
     $npmPackage | Set-Content "$OutputPath\version"
 }
 
-
+Invoke-RemoveUnusedFilesForComponentGovernance
 $StartTime = (Get-Date)
 
 $VCVARS_PATH = Find-VS-Path
