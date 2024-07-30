@@ -53,9 +53,18 @@ set(LLVM_ENABLE_RTTI ON)
 
 add_hermes_unittest(APITests ${APITestsSources})
 
-target_link_libraries(APITests libhermes2 compileJS SegmentTestCompile traceInterpreter
+target_link_libraries(APITests libhermes compileJS SegmentTestCompile traceInterpreter
                                timerStats hermesABIRuntimeWrapper hermesabi hermesSandboxRuntime
-                               cdpInternal)
+                               cdpInternal hermesNodeApiJsiRuntime)
 
 add_hermes_unittest(APILeanTests APILeanTest.cpp)
 target_link_libraries(APILeanTests libhermes_lean jsi)
+
+# copy hermes.dll next to the NodeApiTests.exe
+add_custom_command(TARGET APITests POST_BUILD
+  DEPENDS libshared
+  VERBATIM
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+  $<TARGET_FILE:libshared>
+  $<TARGET_FILE_DIR:APITests>)
+
