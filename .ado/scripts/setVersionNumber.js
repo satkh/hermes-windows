@@ -43,8 +43,11 @@ function computeVersion() {
 
     // $TODO DO NOT CHECK IN, FOR TESTING ONLY.
     if (sourceBranch === "refs/heads/1espt") {
-        return computeMainVersion();
-      }
+      return computeMainVersion();
+    }
+    if (sourceBranch === "refs/heads/user/vmoroz/fix_binskim") {
+      return computeMainVersion();
+    }
 
     if (sourceBranch.startsWith("refs/heads/rnw/abi")) {
       return computeReleaseVersion();
