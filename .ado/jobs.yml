@@ -20,7 +20,7 @@ jobs:
           BuildConfiguration: release
           BuildPlatform: x86
           BuildAppPlatform: uwp
-        ReleaseARM64Uwp:
+        ReleaseArm64Uwp:
           BuildConfiguration: release
           BuildPlatform: arm64
           BuildAppPlatform: uwp
@@ -32,7 +32,7 @@ jobs:
           BuildConfiguration: release
           BuildPlatform: x86
           BuildAppPlatform: win32
-        ReleaseARM64Win32:
+        ReleaseArm64Win32:
           BuildConfiguration: release
           BuildPlatform: arm64
           BuildAppPlatform: win32
@@ -47,8 +47,8 @@ jobs:
       templateContext:
         outputs:
           - output: buildArtifacts
-            PathtoPublish: $(Build.ArtifactStagingDirectory)
-            ArtifactName: HermesArtifacts
+            pathToPublish: $(Build.ArtifactStagingDirectory)
+            artifactName: HermesArtifacts
     steps:
       - task: PowerShell@2
         displayName: Run the build script for publish
@@ -65,18 +65,23 @@ jobs:
             -FileVersion:"$(fileVersion)"
 
       - ${{ if parameters.isPublish }}:
-        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@2
+        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
           displayName: CodeSign Binaries
           condition: not(eq(variables['Build.Reason'], 'PullRequest'))
           inputs:
-            ConnectedServiceName: ESRP-JsHost2
-            FolderPath: $(Build.ArtifactStagingDirectory)
+            connectedServiceName: 'ESRP-JSHost3'
+            appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+            appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+            authAKVName: 'OGX-JSHost-KV'
+            authCertName: 'OGX-JSHost-Auth4'
+            authSignCertName: 'OGX-JSHost-Sign3'
+            folderPath: $(Build.ArtifactStagingDirectory)
             # Recursively finds files matching these patterns:
-            Pattern: |
+            pattern: |
               **/hermes.dll
               **/hermes.exe
               **/hermesc.exe
-            UseMinimatch: true
+            useMinimatch: true
             signConfigType: inlineSignParams
             inlineOperation: |
               [
@@ -105,13 +110,6 @@ jobs:
       - script: echo TODO - Add Tests here
         displayName: '[Test] - To be Added via bug #77'
 
-      - ${{ if not(parameters.isPublish) }}:
-        - task: PublishBuildArtifacts@1
-          displayName: "Publish artifacts"
-          inputs:
-            artifactName: HermesArtifacts
-            pathtoPublish: $(Build.ArtifactStagingDirectory)
-
       # Make symbols available through http://symweb.
       - task: PublishSymbols@2
         displayName: Publish symbols
@@ -129,8 +127,8 @@ jobs:
       templateContext:
         outputs:
           - output: pipelineArtifact
-            targetPath: $(System.DefaultWorkingDirectory)\NugetRootFinal
-            artifactName: "Hermes-final-nuget"
+            artifactName: published-packages
+            targetPath: $(Build.StagingDirectory)\build\pkg
     steps:
       - checkout: none
 
@@ -157,7 +155,7 @@ jobs:
         inputs:
           command: pack
           packagesToPack: $(System.DefaultWorkingDirectory)\HermesArtifacts\Microsoft.JavaScript.Hermes.nuspec
-          packDestination: $(System.DefaultWorkingDirectory)\NugetRootFinal
+          packDestination: $(Build.StagingDirectory)\build\pkg
           buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(System.DefaultWorkingDirectory)\HermesArtifacts;RepoUri=$(Build.Repository.Uri)
           versioningScheme: byEnvVar
           versionEnvVar: Version
@@ -167,22 +165,27 @@ jobs:
         inputs:
           command: pack
           packagesToPack: $(System.DefaultWorkingDirectory)\HermesArtifacts\Microsoft.JavaScript.Hermes.Fat.nuspec
-          packDestination: $(System.DefaultWorkingDirectory)\NugetRootFinal
+          packDestination: $$(Build.StagingDirectory)\build\pkg
           buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(System.DefaultWorkingDirectory)\HermesArtifacts;RepoUri=$(Build.Repository.Uri)
           versioningScheme: byEnvVar
           versionEnvVar: Version
 
       - ${{ if parameters.isPublish }}:
-        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@2
+        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
           displayName: CodeSign NuGets
           condition: not(eq(variables['Build.Reason'], 'PullRequest'))
           inputs:
-            ConnectedServiceName: ESRP-JsHost2
-            FolderPath: $(System.DefaultWorkingDirectory)\NugetRootFinal
-            Pattern: |
+            connectedServiceName: 'ESRP-JSHost3'
+            appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+            appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+            authAKVName: 'OGX-JSHost-KV'
+            authCertName: 'OGX-JSHost-Auth4'
+            authSignCertName: 'OGX-JSHost-Sign3'
+            folderPath: $(Build.StagingDirectory)\build\pkg
+            pattern: |
               **/Microsoft.JavaScript.Hermes.*.nupkg
               **/Microsoft.JavaScript.Hermes.Fat.*.nupkg
-            UseMinimatch: true
+            useMinimatch: true
             signConfigType: inlineSignParams
             inlineOperation: |
               [
@@ -201,17 +204,3 @@ jobs:
                   "ToolVersion" : "1.0"
                 }
               ]
-
-      - ${{ if not(parameters.isPublish) }}:
-          - task: AzureArtifacts.manifest-generator-task.manifest-generator-task.ManifestGeneratorTask@0
-            displayName: 📒 Generate Manifest NuGet
-            condition: not(eq(variables['Build.Reason'], 'PullRequest'))
-            inputs:
-              BuildDropPath: $(System.DefaultWorkingDirectory)\NugetRootFinal
-  
-          - task: PublishBuildArtifacts@1
-            displayName: "Publish final nuget artifacts"
-            inputs:
-              PathtoPublish: $(System.DefaultWorkingDirectory)\NugetRootFinal
-              ArtifactName: "Hermes-final-nuget"
-
