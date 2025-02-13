@@ -69,60 +69,62 @@ jobs:
             -FileVersion:"$(fileVersion)"
             -FakeBuild:$$(fakeBuild)
 
-      - ${{ if parameters.isPublish }}:
-        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
-          displayName: CodeSign Binaries
-          condition: not(eq(variables['Build.Reason'], 'PullRequest'))
-          inputs:
-            connectedServiceName: 'ESRP-JSHost3'
-            appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
-            appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
-            authAKVName: 'OGX-JSHost-KV'
-            authCertName: 'OGX-JSHost-Auth4'
-            authSignCertName: 'OGX-JSHost-Sign3'
-            folderPath: $(Build.ArtifactStagingDirectory)
-            # Recursively finds files matching these patterns:
-            pattern: |
-              **/hermes.dll
-              **/hermes.exe
-              **/hermesc.exe
-            useMinimatch: true
-            signConfigType: inlineSignParams
-            inlineOperation: |
-              [
-                {
-                  "KeyCode" : "CP-230012",
-                  "OperationCode" : "SigntoolSign",
-                  "Parameters" : {
-                    "OpusName" : "Microsoft",
-                    "OpusInfo" : "http://www.microsoft.com",
-                    "FileDigest" : "/fd \"SHA256\"",
-                    "PageHash" : "/NPH",
-                    "TimeStamp" : "/tr \"http://rfc3161.gtm.corp.microsoft.com/TSS/HttpTspServer\" /td sha256"
+      - ${{ if ne(variables.FakeBuild, true) }}:
+        - ${{ if parameters.isPublish }}:
+          - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
+            displayName: CodeSign Binaries
+            condition: not(eq(variables['Build.Reason'], 'PullRequest'))
+            inputs:
+              connectedServiceName: 'ESRP-JSHost3'
+              appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+              appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+              authAKVName: 'OGX-JSHost-KV'
+              authCertName: 'OGX-JSHost-Auth4'
+              authSignCertName: 'OGX-JSHost-Sign3'
+              folderPath: $(Build.ArtifactStagingDirectory)
+              # Recursively finds files matching these patterns:
+              pattern: |
+                **/hermes.dll
+                **/hermes.exe
+                **/hermesc.exe
+              useMinimatch: true
+              signConfigType: inlineSignParams
+              inlineOperation: |
+                [
+                  {
+                    "KeyCode" : "CP-230012",
+                    "OperationCode" : "SigntoolSign",
+                    "Parameters" : {
+                      "OpusName" : "Microsoft",
+                      "OpusInfo" : "http://www.microsoft.com",
+                      "FileDigest" : "/fd \"SHA256\"",
+                      "PageHash" : "/NPH",
+                      "TimeStamp" : "/tr \"http://rfc3161.gtm.corp.microsoft.com/TSS/HttpTspServer\" /td sha256"
+                    },
+                    "ToolName" : "sign",
+                    "ToolVersion" : "1.0"
                   },
-                  "ToolName" : "sign",
-                  "ToolVersion" : "1.0"
-                },
-                {
-                  "KeyCode" : "CP-230012",
-                  "OperationCode" : "SigntoolVerify",
-                  "Parameters" : {},
-                  "ToolName" : "sign",
-                  "ToolVersion" : "1.0"
-                }
+                  {
+                    "KeyCode" : "CP-230012",
+                    "OperationCode" : "SigntoolVerify",
+                    "Parameters" : {},
+                    "ToolName" : "sign",
+                    "ToolVersion" : "1.0"
+                  }
               ]
 
       - script: echo TODO - Add Tests here
         displayName: '[Test] - To be Added via bug #77'
 
       # Make symbols available through http://symweb.
-      - task: PublishSymbols@2
-        displayName: Publish symbols
-        condition: not(eq(variables['Build.Reason'], 'PullRequest'))
-        inputs:
-          SearchPattern: $(Build.ArtifactStagingDirectory)/**/*.pdb
-          SymbolServerType: TeamServices
-          UseNetCoreClientTool: true
+      - ${{ if ne(variables.FakeBuild, true) }}:
+        - task: PublishSymbols@2
+          displayName: Publish symbols
+          condition: not(eq(variables['Build.Reason'], 'PullRequest'))
+          inputs:
+            SearchPattern: $(Build.ArtifactStagingDirectory)/**/*.pdb
+            SymbolServerType: TeamServices
+            UseNetCoreClientTool: true
 
       - script: |
           ls -R $(Build.ArtifactStagingDirectory)
