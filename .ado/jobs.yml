@@ -40,14 +40,18 @@ jobs:
           BuildConfiguration: release
           BuildPlatform: arm64ec
           BuildAppPlatform: win32
+
     variables:
       semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
       fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+      # To fake building hermes for faster debugging
+      fakeBuild: true
+
     ${{ if parameters.isPublish }}:
       templateContext:
         outputs:
           - output: buildArtifacts
-            PathtoPublish: $(Build.ArtifactStagingDirectory)
+            pathtoPublish: $(Build.ArtifactStagingDirectory)
             artifactName: HermesArtifacts
     steps:
       - task: PowerShell@2
@@ -63,6 +67,7 @@ jobs:
             -AppPlatform:$(BuildAppPlatform)
             -ReleaseVersion:"$(semanticVersion)"
             -FileVersion:"$(fileVersion)"
+            -FakeBuild:$$(fakeBuild)
 
       - ${{ if parameters.isPublish }}:
         - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
@@ -119,6 +124,10 @@ jobs:
           SymbolServerType: TeamServices
           UseNetCoreClientTool: true
 
+      - script: |
+          ls -R $(Build.ArtifactStagingDirectory)
+        displayName: Show all files in the Build.ArtifactStagingDirectory
+
   - job: CreateNuGet
     dependsOn:
       - Build
@@ -128,7 +137,7 @@ jobs:
         outputs:
           - output: pipelineArtifact
             artifactName: published-packages
-            PathtoPublish: $(Build.ArtifactStagingDirectory)
+            pathtoPublish: $(Build.ArtifactStagingDirectory)
             targetPath: $(Build.StagingDirectory)\build\pkg
     steps:
       - checkout: none

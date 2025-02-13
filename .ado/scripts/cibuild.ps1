@@ -30,7 +30,8 @@ param(
     [switch]$RunTests,
     [switch]$Incremental,
     [switch]$UseVS,
-    [switch]$ConfigureOnly
+    [switch]$ConfigureOnly,
+    [switch]$FakeBuild
 )
 
 function Find-Path($exename) {
@@ -297,24 +298,32 @@ function Invoke-Test-Build($SourcesPath, $buildPath, $compilerAndToolsBuildPath,
 
 function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform) {
 
-    Write-Host "Invoke-Build called with SourcesPath: " $SourcesPath", WorkSpacePath: " $WorkSpacePath  ", OutputPath: " $OutputPath ", Platform: " $Platform ", Configuration: " $Configuration ", AppPlatform: " $AppPlatform
+    Write-Host "Invoke-Build called with" `
+        " SourcesPath: " $SourcesPath `
+        ", WorkSpacePath: " $WorkSpacePath `
+        ", OutputPath: " $OutputPath `
+        ", Platform: " $Platform `
+        ", Configuration: " $Configuration `
+        ", AppPlatform: " $AppPlatform
+
     $Triplet = "$AppPlatform-$Platform-$Configuration"
     $compilerAndToolsBuildPath = Join-Path $WorkSpacePath "build\tools"
     $compilerPath = Join-Path $compilerAndToolsBuildPath "bin\hermesc.exe"
-    
+
     # Build compiler if it doesn't exist (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !). 
-    if (!(Test-Path -Path $compilerPath)) {
+    if (!$FakeBuild -and !(Test-Path -Path $compilerPath)) {
         Invoke-Compiler-Build $SourcesPath $compilerAndToolsBuildPath $toolsPlatform $toolsConfiguration "win32" $True
     }
-    
-    $buildPath = Join-Path $WorkSpacePath "build\$Triplet"
-    
-    Invoke-Dll-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform $Incremental.IsPresent
 
-    if ($RunTests.IsPresent) {
+    $buildPath = Join-Path $WorkSpacePath "build\$Triplet"
+    if (!$FakeBuild) {
+      Invoke-Dll-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform $Incremental.IsPresent
+    }
+
+    if (!$FakeBuild -and $RunTests.IsPresent) {
         Invoke-Test-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform $Incremental.IsPresent
     }
-    
+
     $finalOutputPath = "$OutputPath\lib\native\$AppPlatform\$Configuration\$Platform";
     if (!(Test-Path -Path $finalOutputPath)) {
         New-Item -ItemType "directory" -Path $finalOutputPath | Out-Null
@@ -322,9 +331,15 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
 
     $RNDIR = Join-Path $buildPath "_deps\reactnative-src"
 
-    Copy-Item "$buildPath\API\hermes_shared\hermes.dll" -Destination $finalOutputPath -force | Out-Null
-    Copy-Item "$buildPath\API\hermes_shared\hermes.lib" -Destination $finalOutputPath -force | Out-Null
-    Copy-Item "$buildPath\API\hermes_shared\hermes.pdb" -Destination $finalOutputPath -force | Out-Null
+    if (!$FakeBuild) {
+        Copy-Item "$buildPath\API\hermes_shared\hermes.dll" -Destination $finalOutputPath -force | Out-Null
+        Copy-Item "$buildPath\API\hermes_shared\hermes.lib" -Destination $finalOutputPath -force | Out-Null
+        Copy-Item "$buildPath\API\hermes_shared\hermes.pdb" -Destination $finalOutputPath -force | Out-Null
+    } else {
+        New-Item -Path $finalOutputPath -Name "hermes.dll" -ItemType File -Force
+        New-Item -Path $finalOutputPath -Name "hermes.lib" -ItemType File -Force
+        New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force
+    }
 
     if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
         New-Item -ItemType "directory" -Path "$OutputPath\lib\uap\" | Out-Null
@@ -335,13 +350,21 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
     if (!(Test-Path -Path $toolsPath)) {
         New-Item -ItemType "directory" -Path $toolsPath | Out-Null
     }
-    Copy-Item "$compilerAndToolsBuildPath\bin\hermes.exe" -Destination $toolsPath
+    if (!$FakeBuild) {
+        Copy-Item "$compilerAndToolsBuildPath\bin\hermes.exe" -Destination $toolsPath
+    } else {
+        New-Item -Path $toolsPath -Name "hermes.exe" -ItemType File -Force
+    }
 
     $flagsPath = "$OutputPath\build\native\flags\$Triplet"
     if (!(Test-Path -Path $flagsPath)) {
         New-Item -ItemType "directory" -Path $flagsPath | Out-Null
     }
-    Copy-Item "$buildPath\build.ninja" -Destination $flagsPath -force | Out-Null
+    if (!$FakeBuild) {
+        Copy-Item "$buildPath\build.ninja" -Destination $flagsPath -force | Out-Null
+    } else {
+        New-Item -Path $flagsPath -Name "build.ninja" -ItemType File -Force
+    }
 
     Copy-Headers $SourcesPath $WorkSpacePath $OutputPath $Platform $Configuration $AppPlatform $RNDIR
 }
@@ -409,7 +432,7 @@ Push-Location $WorkSpacePath
 try {
     Invoke-UpdateReleaseVersion -SourcesPath $SourcesPath -ReleaseVersion $ReleaseVersion -FileVersion $FileVersion
 
-    # run the actual builds and copy artefacts
+    # run the actual builds and copy artifacts
     foreach ($Plat in $Platform) {
         foreach ($Config in $Configuration) {
             Invoke-BuildAndCopy -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
