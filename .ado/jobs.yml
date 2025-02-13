@@ -47,7 +47,7 @@ jobs:
       templateContext:
         outputs:
           - output: buildArtifacts
-            pathToPublish: $(Build.ArtifactStagingDirectory)
+            PathtoPublish: $(Build.ArtifactStagingDirectory)
             artifactName: HermesArtifacts
     steps:
       - task: PowerShell@2
@@ -128,7 +128,7 @@ jobs:
         outputs:
           - output: pipelineArtifact
             artifactName: published-packages
-            pathToPublish: $(Build.ArtifactStagingDirectory)
+            PathtoPublish: $(Build.ArtifactStagingDirectory)
             targetPath: $(Build.StagingDirectory)\build\pkg
     steps:
       - checkout: none
