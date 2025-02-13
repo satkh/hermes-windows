@@ -38,7 +38,8 @@ function main() {
 function computeVersion() {
   // Compute base version;
   const sourceBranch = env["Build_SourceBranch"];
-  if (sourceBranch === "refs/heads/main") {
+  if (sourceBranch === "refs/heads/main" ||
+    sourceBranch === "user/vmorozov/1es-pt-migration-microsoft.hermes-windows.ci") {
     return computeReleaseVersion();
   }
   fatalError(`Build script does not support source branch '${sourceBranch}'.`);
