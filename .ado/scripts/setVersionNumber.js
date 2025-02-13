@@ -46,7 +46,9 @@ function computeVersion() {
 }
 
 function computeReleaseVersion() {
-  const buildNumber = env["Build_BuildNumber"];
+  let buildNumber = env["Build_BuildNumber"];
+  if (buildNumber.startsWith("temp_")) 
+    buildNumber = buildNumber.substring(5);
   const buildNumberParts = buildNumber.split(".");
   if (buildNumberParts.length !== 3) {
     fatalError(
