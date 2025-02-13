@@ -128,6 +128,7 @@ jobs:
         outputs:
           - output: pipelineArtifact
             artifactName: published-packages
+            pathToPublish: $(Build.ArtifactStagingDirectory)
             targetPath: $(Build.StagingDirectory)\build\pkg
     steps:
       - checkout: none
