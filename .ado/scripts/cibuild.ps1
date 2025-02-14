@@ -341,10 +341,10 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force
     }
 
-    if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
-        New-Item -ItemType "directory" -Path "$OutputPath\lib\uap\" | Out-Null
-        New-Item -Path "$OutputPath\lib\uap\" -Name "_._" -ItemType File
-    }
+    #if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
+    #    New-Item -ItemType "directory" -Path "$OutputPath\lib\uap\" | Out-Null
+    #    New-Item -Path "$OutputPath\lib\uap\" -Name "_._" -ItemType File
+    #}
 
     $toolsPath = "$OutputPath\tools\native\$toolsConfiguration\$toolsPlatform"
     if (!(Test-Path -Path $toolsPath)) {
@@ -366,7 +366,7 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         New-Item -Path $flagsPath -Name "build.ninja" -ItemType File -Force
     }
 
-    Copy-Headers $SourcesPath $WorkSpacePath $OutputPath $Platform $Configuration $AppPlatform $RNDIR
+    # Copy-Headers $SourcesPath $WorkSpacePath $OutputPath $Platform $Configuration $AppPlatform $RNDIR
 }
 
 function Copy-Headers($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform, $RNDIR) {
@@ -436,7 +436,7 @@ try {
     foreach ($Plat in $Platform) {
         foreach ($Config in $Configuration) {
             Invoke-BuildAndCopy -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
-            Invoke-PrepareNugetPackage -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
+           # Invoke-PrepareNugetPackage -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
         }
     }
 } finally {
