@@ -31,15 +31,16 @@ param(
     [switch]$Incremental,
     [switch]$UseVS,
     [switch]$ConfigureOnly,
-    [switch]$FakeBuild
+    [switch]$SkipBuild,
+    [switch]$SkipPrepareNuget,
+    [switch]$FakeBuild,
 )
 
 function Find-Path($exename) {
-    $v = (get-command $exename -ErrorAction SilentlyContinue)
-    if ($v.Path) {
-        return $v.Path
-    }
-    else {
+    $exeName = (get-command $exename -ErrorAction SilentlyContinue)
+    if ($exeName.Path) {
+        return $exeName.Path
+    } else {
         throw "Could not find $exename"
     }
 }
@@ -48,8 +49,7 @@ function Find-VS-Path() {
     $vsWhere = (get-command "vswhere.exe" -ErrorAction SilentlyContinue)
     if ($vsWhere) {
         $vsWhere = $vsWhere.Path
-    }
-    else {
+    } else {
         $vsWhere = "${Env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" 
     }
 
@@ -103,8 +103,7 @@ function Get-VCVarsParam($plat = "x64", $arch = "win32") {
 }
 
 function Get-CMakeConfiguration($config) {
-    $val = switch ($config)
-    {
+    $val = switch ($config) {
         "debug" {"FastDebug"}
         "release" {"Release"}
         default {"Debug"}
@@ -183,7 +182,15 @@ function get-CommonArgs($Platform, $Configuration, $AppPlatform, [ref]$genArgs) 
 
 function Invoke-BuildImpl($SourcesPath, $buildPath, $genArgs, $targets, $incrementalBuild, $Platform, $Configuration, $AppPlatform) {
 
-    Write-Host "Invoke-BuildImpl called with SourcesPath: " $SourcesPath", buildPath: " $buildPath  ", genArgs: " $genArgs ", targets: " $targets ", incrementalBuild: " $incrementalBuild", Platform: " $Platform ", Configuration: " $Configuration ", AppPlatform: " $AppPlatform
+    Write-Host "Invoke-BuildImpl called with" `
+        " SourcesPath:" $SourcesPath `
+        ", buildPath: " $buildPath `
+        ", genArgs: " $genArgs `
+        ", targets: " $targets `
+        ", incrementalBuild: " $incrementalBuild`
+        ", Platform: " $Platform `
+        ", Configuration: " $Configuration `
+        ", AppPlatform: " $AppPlatform
 
     # Retain the build folder for incremental builds only.
     if (!$incrementalBuild -and (Test-Path -Path $buildPath)) {
@@ -197,43 +204,23 @@ function Invoke-BuildImpl($SourcesPath, $buildPath, $genArgs, $targets, $increme
         Write-Host $genCall
         $ninjaCmd = "ninja"
 
-        foreach ( $target in $targets )
-        {
+        foreach ( $target in $targets ) {
             $ninjaCmd = $ninjaCmd + " " + $target
         }
 
         Write-Host $ninjaCmd
 
-        # See https://developercommunity.visualstudio.com/content/problem/257260/vcvarsallbat-reports-the-input-line-is-too-long-if.html
-        $Bug257260 = $false
+        $GenCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $genCall 2>&1"
+        Write-Host "Command: $GenCmd"
+        cmd /c $GenCmd
 
-        if ($Bug257260) {
-            Invoke-Environment $VCVARS_PATH (Get-VCVarsParam $Platform $AppPlatform)
-            Invoke-Expression $genCall
-            
-            if ($ConfigureOnly.IsPresent){
-                exit 0;
-            }
-
-            if ($UseVS.IsPresent) {
-                exit  1;
-            } else {
-                ninja $ninjaCmd
-            }
-
-        } else {
-            $GenCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $genCall 2>&1"
-            Write-Host "Command: $GenCmd"
-            cmd /c $GenCmd
-
-            if ($ConfigureOnly.IsPresent){
-                exit 0;
-            }
-
-            $NinjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && ${ninjaCmd} 2>&1"
-            Write-Host "Command: $NinjaCmd"
-            cmd /c $NinjaCmd
+        if ($ConfigureOnly.IsPresent) {
+            exit 0;
         }
+
+        $NinjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && ${ninjaCmd} 2>&1"
+        Write-Host "Command: $NinjaCmd"
+        cmd /c $NinjaCmd
     } finally {
         Pop-Location
     }
@@ -341,11 +328,6 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force
     }
 
-    #if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
-    #    New-Item -ItemType "directory" -Path "$OutputPath\lib\uap\" | Out-Null
-    #    New-Item -Path "$OutputPath\lib\uap\" -Name "_._" -ItemType File
-    #}
-
     $toolsPath = "$OutputPath\tools\native\$toolsConfiguration\$toolsPlatform"
     if (!(Test-Path -Path $toolsPath)) {
         New-Item -ItemType "directory" -Path $toolsPath | Out-Null
@@ -356,6 +338,7 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         New-Item -Path $toolsPath -Name "hermes.exe" -ItemType File -Force
     }
 
+    # TODO: remove - it was added for debugging purposes only
     $flagsPath = "$OutputPath\build\native\flags\$Triplet"
     if (!(Test-Path -Path $flagsPath)) {
         New-Item -ItemType "directory" -Path $flagsPath | Out-Null
@@ -365,11 +348,9 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
     } else {
         New-Item -Path $flagsPath -Name "build.ninja" -ItemType File -Force
     }
-
-    # Copy-Headers $SourcesPath $WorkSpacePath $OutputPath $Platform $Configuration $AppPlatform $RNDIR
 }
 
-function Copy-Headers($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform, $RNDIR) {
+function Copy-Headers($SourcesPath, $OutputPath) {
 
     if (!(Test-Path -Path "$OutputPath\build\native\include\jsi")) {
         New-Item -ItemType "directory" -Path "$OutputPath\build\native\include\jsi" | Out-Null
@@ -392,13 +373,15 @@ function Copy-Headers($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Con
     Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -force
 }
 
-function Invoke-PrepareNugetPackage($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform) {
+function Invoke-PrepareNugetPackage($SourcesPath, $OutputPath) {
     $nugetPath = Join-Path $OutputPath "nuget"
     if (!(Test-Path -Path $nugetPath)) {
         New-Item -ItemType "directory" -Path $nugetPath | Out-Null
     }
 
-    # copy misc files for NuGet packaging.
+    Copy-Headers $SourcesPath $OutputPath
+
+    # Copy misc files for NuGet packaging.
     if (!(Test-Path -Path "$OutputPath\license")) {
         New-Item -ItemType "directory" -Path "$OutputPath\license" | Out-Null
     }
@@ -407,14 +390,25 @@ function Invoke-PrepareNugetPackage($SourcesPath, $WorkSpacePath, $OutputPath, $
     Copy-Item "$SourcesPath\.ado\NOTICE.txt" -Destination "$OutputPath\license\" -force
     Copy-Item "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -force
 
-    # process version information
+    # To make the package UWP compatible
+    if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
+        New-Item -ItemType "directory" -Path "$OutputPath\lib\uap\" | Out-Null
+        New-Item -Path "$OutputPath\lib\uap\" -Name "_._" -ItemType File
+    }
+
+    # Process version information
 
     $gitRevision = ((git rev-parse --short HEAD) | Out-String).Trim()
 
     $npmPackage = (Get-Content (Join-Path $SourcesPath "npm\package.json") | Out-String | ConvertFrom-Json).version
 
-    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.nuspec") -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.nuspec"
-    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.Fat.nuspec") -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.Fat.nuspec"
+    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.nuspec") `
+        -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") `
+        | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.nuspec"
+
+    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.Fat.nuspec") `
+        -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") `
+        | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.Fat.nuspec"
     
     $npmPackage | Set-Content "$OutputPath\version"
 }
@@ -432,12 +426,17 @@ Push-Location $WorkSpacePath
 try {
     Invoke-UpdateReleaseVersion -SourcesPath $SourcesPath -ReleaseVersion $ReleaseVersion -FileVersion $FileVersion
 
-    # run the actual builds and copy artifacts
-    foreach ($Plat in $Platform) {
-        foreach ($Config in $Configuration) {
-            Invoke-BuildAndCopy -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
-           # Invoke-PrepareNugetPackage -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
+    if (!$SkipBuild) {
+        # run the actual builds and copy artifacts
+        foreach ($Plat in $Platform) {
+            foreach ($Config in $Configuration) {
+                Invoke-BuildAndCopy -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
+            }
         }
+    }
+
+    if (!$SkipPrepareNuget) {
+      Invoke-PrepareNugetPackage -SourcesPath $SourcesPath -OutputPath $OutputPath
     }
 } finally {
     Pop-Location
