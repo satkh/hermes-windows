@@ -49,7 +49,7 @@ jobs:
         templateContext:
           outputs:
             - output: pipelineArtifact
-              artifactName: Build_Artifacts
+              artifactName: ${{ MatrixEntry.Name }}
               targetPath: $(Build.StagingDirectory)\build
 
       steps:
