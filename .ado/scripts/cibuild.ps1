@@ -298,7 +298,7 @@ function Invoke-Test-Build($SourcesPath, $buildPath, $compilerAndToolsBuildPath,
 
 function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform) {
 
-    Write-Host "Invoke-Build called with" `
+    Write-Host "Invoke-BuildAndCopy is called with" `
         " SourcesPath: " $SourcesPath `
         ", WorkSpacePath: " $WorkSpacePath `
         ", OutputPath: " $OutputPath `
@@ -336,7 +336,7 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         Copy-Item "$buildPath\API\hermes_shared\hermes.lib" -Destination $finalOutputPath -force | Out-Null
         Copy-Item "$buildPath\API\hermes_shared\hermes.pdb" -Destination $finalOutputPath -force | Out-Null
     } else {
-        New-Item -Path $finalOutputPath -Name "hermes.dll" -ItemType File -Force
+        Copy-Item "$env:SystemRoot\system32\kernel32.dll" -Destination "$finalOutputPath\hermes.dll" -force | Out-Null
         New-Item -Path $finalOutputPath -Name "hermes.lib" -ItemType File -Force
         New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force
     }
