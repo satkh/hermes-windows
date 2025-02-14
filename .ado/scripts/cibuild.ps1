@@ -33,7 +33,7 @@ param(
     [switch]$ConfigureOnly,
     [switch]$SkipBuild,
     [switch]$SkipPrepareNuget,
-    [switch]$FakeBuild,
+    [switch]$FakeBuild
 )
 
 function Find-Path($exename) {
