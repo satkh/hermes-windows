@@ -1,3 +1,7 @@
+<#
+.SYNOPSIS
+    Build and prepare NuGet packages. Use it to run locally on in CI environment.
+#>
 param(
     [string]$SourcesPath = "$PSScriptRoot\..\..",
     [string]$WorkSpacePath = "$SourcesPath\workspace",
@@ -18,21 +22,30 @@ param(
     [ValidateSet("win32", "uwp")]
     [String]$AppPlatform = "uwp",
 
-    # e.g. "10.0.17763.0"
-    [String]$SDKVersion = "",
+    # Windows SDK Version. E.g. "10.0.17763.0"
+    [String]$WindowsSDKVersion = "",
 
+    # The NuGet package release version
     # e.g. "0.0.0-2209.28001-8af7870c" for pre-release or "0.70.2" for release
-    [String]$ReleaseVersion = "",
+    [String]$ReleaseVersion = "0.0.0",
 
+    # The version set in binary files.
     # e.g. "0.0.2209.28001" for pre-release or "0.70.2.0" for release
-    [String]$FileVersion = "",
+    [String]$FileVersion = "0.0.0.0",
 
     [switch]$RunTests,
-    [switch]$Incremental,
-    [switch]$UseVS,
+    [switch]$IncrementalBuild,
+    [switch]$UseNinja = $true,
     [switch]$ConfigureOnly,
+    
+    # Do not build binaries. Use it to split the build and prepare script steps.
     [switch]$SkipBuild,
+
+    # Do not run the prepare NuGet script. Use it to split the build and prepare script steps.
     [switch]$SkipPrepareNuget,
+
+    # Do not build binaries and instead replace them with fake files.
+    # Use it for faster debugging the rest of the code.
     [switch]$FakeBuild
 )
 
@@ -55,14 +68,14 @@ function Find-VS-Path() {
 
     if (Test-Path $vsWhere) {
         $versionJson = & $vsWhere -format json
-        $versionJson = & $vsWhere -format json -version 16
+        $versionJson = & $vsWhere -format json -version 17
         $versionJson = $versionJson | ConvertFrom-Json
     } else {
         $versionJson = @()
     }
 
     if ($versionJson.Length -gt 1) {
-      Write-Warning 'More than one VS install detected, picking the first one';
+      Write-Warning "More than one VS install detected, picking the first one";
       $versionJson = $versionJson[0];
     }
 
@@ -92,8 +105,8 @@ function Get-VCVarsParam($plat = "x64", $arch = "win32") {
         $args_ = "$args_ uwp"
     }
 
-    if ($SDKVersion) {
-        $args_ = "$args_ $SDKVersion"
+    if ($WindowsSDKVersion) {
+        $args_ = "$args_ $WindowsSDKVersion"
     }
 
     # Spectre mitigations (for SDL)
@@ -113,149 +126,133 @@ function Get-CMakeConfiguration($config) {
 }
 
 function Invoke-RemoveUnusedFilesForComponentGovernance() {
-    if (Test-Path -Path ".\unsupported\juno") {
-        Remove-Item -Path ".\unsupported\juno" -Force -Recurse
-    }
+    Invoke-DeleteDir ".\unsupported\juno"
 }
 
 function Invoke-Environment($Command, $arg) {
     $Command = "`"" + $Command + "`" " + $arg
     Write-Host "Running command [ $Command ]"
     cmd /c "$Command && set" | . { process {
-        if ($_ -match '^([^=]+)=(.*)') {
+        if ($_ -match "^([^=]+)=(.*)") {
             [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
         }
     }}
 }
 
-function Invoke-UpdateReleaseVersion($SourcesPath, $ReleaseVersion, $FileVersion) {
+function Invoke-UpdateHermesVersion() {
     if ([String]::IsNullOrWhiteSpace($ReleaseVersion)) {
         return
     }
 
-    $ProjectVersion = $ReleaseVersion
+    $hermesVersion = $ReleaseVersion
     if ($ReleaseVersion.StartsWith("0.0.0")) {
         # Use file version as a project version for pre-release builds
         # because CMake does not accept our pre-release version format.
-        $ProjectVersion = $FileVersion
+        $hermesVersion = $FileVersion
     }
 
     $filePath1 = Join-Path $SourcesPath "CMakeLists.txt"
-    $versionRegex1 = '        VERSION .*'
-    $versionStr1 = '        VERSION ' + $ProjectVersion
+    $versionRegex1 = "        VERSION .*"
+    $versionStr1 = "        VERSION $hermesVersion"
     $content1 = (Get-Content $filePath1) -replace $versionRegex1, $versionStr1 -join "`r`n"
     [IO.File]::WriteAllText($filePath1, $content1)
 
     $filePath2 = Join-Path (Join-Path $SourcesPath "npm") "package.json"
-    $versionRegex2 = '"version": ".*",'
-    $versionStr2 = '"version": "' + $ReleaseVersion + '",'
+    $versionRegex2 = "`"version`": `".*`","
+    $versionStr2 = "`"version`": `"$ReleaseVersion`","
     $content2 = (Get-Content $filePath2) -replace $versionRegex2, $versionStr2 -join "`r`n"
     [IO.File]::WriteAllText($filePath2, $content2)
 
     Write-Host "Release version set to $ReleaseVersion"
-    Write-Host "Project version set to $ProjectVersion"
+    Write-Host "Hermes version set to $hermesVersion"
 }
 
-function get-CommonArgs($Platform, $Configuration, $AppPlatform, [ref]$genArgs) {
-    if ($UseVS.IsPresent) {
-        # TODO: use VS version chosen before
-        $genArgs.Value += '-G "Visual Studio 16 2019"'
-        $cmakePlatform = $Platform;
-        if ($cmakePlatform -eq 'x86') {
-            $cmakePlatform = 'Win32';
-        }
-        $genArgs.Value += ('-A {0}' -f $cmakePlatform)
+function Get-CommonArgs($Platform, $Configuration, [ref]$GenArgs) {
+    if ($UseNinja) {
+        $GenArgs.Value += "-G Ninja"
     } else {
-        $genArgs.Value += '-G Ninja'
+        # TODO: use VS version chosen before
+        $GenArgs.Value += "-G `"Visual Studio 17 2022`""
+        $cmakePlatform = $Platform;
+        if ($cmakePlatform -eq "x86") {
+            $cmakePlatform = "Win32";
+        }
+        $GenArgs.Value += "-A $cmakePlatform"
     }
 
-    $genArgs.Value += ('-DCMAKE_BUILD_TYPE={0}' -f (Get-CMakeConfiguration $Configuration))
+    $cmakeConfiguration = Get-CMakeConfiguration $Configuration
+    $GenArgs.Value += "-DCMAKE_BUILD_TYPE=$cmakeConfiguration"
 
-    $genArgs.Value += '-DHERMESVM_PLATFORM_LOGGING=On'
+    $GenArgs.Value += "-DHERMESVM_PLATFORM_LOGGING=On"
 
     if (![String]::IsNullOrWhiteSpace($FileVersion)) {
-        $genArgs.Value += '-DHERMES_FILE_VERSION=' + $FileVersion
+        $GenArgs.Value += "-DHERMES_FILE_VERSION=$FileVersion"
     }
-
-    Write-Host "HERMES_FILE_VERSION is $FileVersion"
 }
 
-function Invoke-BuildImpl($SourcesPath, $buildPath, $genArgs, $targets, $incrementalBuild, $Platform, $Configuration, $AppPlatform) {
-
-    Write-Host "Invoke-BuildImpl called with" `
-        " SourcesPath:" $SourcesPath `
-        ", buildPath: " $buildPath `
-        ", genArgs: " $genArgs `
-        ", targets: " $targets `
-        ", incrementalBuild: " $incrementalBuild`
-        ", Platform: " $Platform `
-        ", Configuration: " $Configuration `
-        ", AppPlatform: " $AppPlatform
-
+function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targets) {
     # Retain the build folder for incremental builds only.
-    if (!$incrementalBuild -and (Test-Path -Path $buildPath)) {
-        Remove-Item $buildPath -Recurse -ErrorAction Ignore
+    if (!$IncrementalBuild) {
+        Invoke-DeleteDir $BuildPath
     }
-    
-    New-Item -ItemType "directory" -Path $buildPath -ErrorAction Ignore | Out-Null
-    Push-Location $buildPath
+
+    Invoke-EnsureDir $BuildPath
+    Push-Location $BuildPath
     try {
-        $genCall = ('cmake {0}' -f ($genArgs -Join ' ')) + " $SourcesPath";
-        Write-Host $genCall
-        $ninjaCmd = "ninja"
+        $genCall = ("cmake {0}" -f ($GenArgs -Join " ")) + " $SourcesPath"
+        Write-Host "genCall: $genCall"
 
-        foreach ( $target in $targets ) {
-            $ninjaCmd = $ninjaCmd + " " + $target
-        }
+        $ninjaCall = ("ninja {0}" -f ($Targets -Join " "))
+        Write-Host "ninjaCall: $ninjaCall"
 
-        Write-Host $ninjaCmd
-
-        $GenCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $genCall 2>&1"
-        Write-Host "Command: $GenCmd"
+        $genCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $genCall 2>&1"
+        Write-Host "Run command: $genCmd"
         cmd /c $GenCmd
 
-        if ($ConfigureOnly.IsPresent) {
+        if ($ConfigureOnly) {
+            Write-Host "Exit: configure only"
             exit 0;
         }
 
-        $NinjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && ${ninjaCmd} 2>&1"
-        Write-Host "Command: $NinjaCmd"
+        $ninjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $ninjaCall 2>&1"
+        Write-Host "Run command: $ninjaCmd"
         cmd /c $NinjaCmd
     } finally {
         Pop-Location
     }
 }
 
-function Invoke-Compiler-Build($SourcesPath, $buildPath, $Platform, $Configuration, $AppPlatform, $incrementalBuild) {
+function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
     $genArgs = @();
-    get-CommonArgs $Platform $Configuration $AppPlatform ([ref]$genArgs)
-    Invoke-BuildImpl $SourcesPath $buildPath $genArgs @('hermes','hermesc') $incrementalBuild $Platform $Configuration $AppPlatform
+    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
+
+    $targets = @("hermes","hermesc")
+
+    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
 }
 
-function Invoke-Dll-Build($SourcesPath, $buildPath, $compilerAndToolsBuildPath, $Platform, $Configuration, $AppPlatform, $incrementalBuild) {
+function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
     $genArgs = @();
-    get-CommonArgs $Platform $Configuration $AppPlatform ([ref]$genArgs)
+    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
 
-    $targets = @('libshared');
-
-    $genArgs += '-DHERMES_ENABLE_DEBUGGER=ON'
-    $genArgs += '-DHERMES_ENABLE_INTL=ON'
+    $genArgs += "-DHERMES_ENABLE_DEBUGGER=ON"
+    $genArgs += "-DHERMES_ENABLE_INTL=ON"
 
     if ($AppPlatform -eq "uwp") {
         # Link against default ICU libraries in Windows 10.
-        $genArgs += '-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF'
+        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF"
     } else {
         # Use our custom WinGlob/NLS based implementation of unicode stubs, to avoid depending on the runtime ICU library.
-        $genArgs += '-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON'
+        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON"
     }
 
     if ($AppPlatform -eq "uwp") {
-        $genArgs += '-DCMAKE_SYSTEM_NAME=WindowsStore'
-        $genArgs += '-DCMAKE_SYSTEM_VERSION="10.0.17763.0"'
-        $genArgs += "-DIMPORT_HERMESC=$compilerAndToolsBuildPath\ImportHermesc.cmake"
+        $genArgs += "-DCMAKE_SYSTEM_NAME=WindowsStore"
+        $genArgs += "-DCMAKE_SYSTEM_VERSION=`"10.0.17763.0`""
+        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
     } elseif ($Platform -eq "arm64" -or $Platform -eq "arm64ec") {
-        $genArgs += '-DHERMES_MSVC_ARM64=On'
-        $genArgs += "-DIMPORT_HERMESC=$compilerAndToolsBuildPath\ImportHermesc.cmake"
+        $genArgs += "-DHERMES_MSVC_ARM64=On"
+        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
     }
 
     if ($Platform -eq "arm64ec") {
@@ -263,60 +260,56 @@ function Invoke-Dll-Build($SourcesPath, $buildPath, $compilerAndToolsBuildPath, 
         $Env:CXXFLAGS = "-arm64EC"
     }
 
-    Invoke-BuildImpl $SourcesPath $buildPath $genArgs $targets $incrementalBuild $Platform $Configuration $AppPlatform
+    $targets = @("libshared");
+
+    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
 }
 
-function Invoke-Test-Build($SourcesPath, $buildPath, $compilerAndToolsBuildPath, $Platform, $Configuration, $AppPlatform,  $incrementalBuild) {
+function Invoke-Test-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
     $genArgs = @();
-    get-CommonArgs([ref]$genArgs)
+    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
 
-    $genArgs += '-DHERMES_ENABLE_DEBUGGER=On'
+    $genArgs += "-DHERMES_ENABLE_DEBUGGER=On"
 
     if ($AppPlatform -eq "uwp") {
-        $genArgs += '-DCMAKE_SYSTEM_NAME=WindowsStore'
-        $genArgs += '-DCMAKE_SYSTEM_VERSION="10.0.17763"'
+        $genArgs += "-DCMAKE_SYSTEM_NAME=WindowsStore"
+        $genArgs += "-DCMAKE_SYSTEM_VERSION=`"10.0.17763`""
     } elseif ($Platform -eq "arm64" -or $Platform -eq "arm64ec") {
-        $genArgs += '-DHERMES_MSVC_ARM64=On'
-        $genArgs += "-DIMPORT_HERMESC=$compilerAndToolsBuildPath\ImportHermesc.cmake"
+        $genArgs += "-DHERMES_MSVC_ARM64=On"
+        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
     }
 
-    Invoke-BuildImpl $SourcesPath, $buildPath, $genArgs, @('check-hermes') $incrementalBuild $Platform $Configuration $AppPlatform
+    $targets = @("check-hermes");
+
+    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
 }
 
-function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platform, $Configuration, $AppPlatform) {
+function Invoke-BuildAndCopy($Platform, $Configuration) {
+    Write-Host "Invoke-BuildAndCopy is called with Platform: $Platform, Configuration: $Configuration"
 
-    Write-Host "Invoke-BuildAndCopy is called with" `
-        " SourcesPath: " $SourcesPath `
-        ", WorkSpacePath: " $WorkSpacePath `
-        ", OutputPath: " $OutputPath `
-        ", Platform: " $Platform `
-        ", Configuration: " $Configuration `
-        ", AppPlatform: " $AppPlatform
-
-    $Triplet = "$AppPlatform-$Platform-$Configuration"
+    $triplet = "$AppPlatform-$Platform-$Configuration"
     $compilerAndToolsBuildPath = Join-Path $WorkSpacePath "build\tools"
     $compilerPath = Join-Path $compilerAndToolsBuildPath "bin\hermesc.exe"
 
-    # Build compiler if it doesn't exist (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !). 
+    # Build compiler if it doesn't exist (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !).
     if (!$FakeBuild -and !(Test-Path -Path $compilerPath)) {
         Invoke-Compiler-Build $SourcesPath $compilerAndToolsBuildPath $toolsPlatform $toolsConfiguration "win32" $True
     }
 
-    $buildPath = Join-Path $WorkSpacePath "build\$Triplet"
+    $buildPath = Join-Path $WorkSpacePath "build\$triplet"
     if (!$FakeBuild) {
-      Invoke-Dll-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform $Incremental.IsPresent
+      Invoke-Dll-Build -Platform $Platform `
+          -Configuration $Configuration `
+          -BuildPath $buildPath `
+          -CompilerAndToolsBuildPath $compilerAndToolsBuildPath
     }
 
     if (!$FakeBuild -and $RunTests.IsPresent) {
-        Invoke-Test-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform $Incremental.IsPresent
+        Invoke-Test-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform
     }
 
     $finalOutputPath = "$OutputPath\lib\native\$AppPlatform\$Configuration\$Platform";
-    if (!(Test-Path -Path $finalOutputPath)) {
-        New-Item -ItemType "directory" -Path $finalOutputPath | Out-Null
-    }
-
-    $RNDIR = Join-Path $buildPath "_deps\reactnative-src"
+    Invoke-EnsureDir $finalOutputPath
 
     if (!$FakeBuild) {
         Copy-Item "$buildPath\API\hermes_shared\hermes.dll" -Destination $finalOutputPath -force | Out-Null
@@ -324,71 +317,42 @@ function Invoke-BuildAndCopy($SourcesPath, $WorkSpacePath, $OutputPath, $Platfor
         Copy-Item "$buildPath\API\hermes_shared\hermes.pdb" -Destination $finalOutputPath -force | Out-Null
     } else {
         Copy-Item "$env:SystemRoot\system32\kernel32.dll" -Destination "$finalOutputPath\hermes.dll" -force | Out-Null
-        New-Item -Path $finalOutputPath -Name "hermes.lib" -ItemType File -Force
-        New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force
+        New-Item -Path $finalOutputPath -Name "hermes.lib" -ItemType File -Force | Out-Null
+        New-Item -Path $finalOutputPath -Name "hermes.pdb" -ItemType File -Force | Out-Null
     }
 
     $toolsPath = "$OutputPath\tools\native\$toolsConfiguration\$toolsPlatform"
-    if (!(Test-Path -Path $toolsPath)) {
-        New-Item -ItemType "directory" -Path $toolsPath | Out-Null
-    }
+    Invoke-EnsureDir $toolsPath
     if (!$FakeBuild) {
-        Copy-Item "$compilerAndToolsBuildPath\bin\hermes.exe" -Destination $toolsPath
+        Copy-Item "$compilerAndToolsBuildPath\bin\hermes.exe" -Destination $toolsPath | Out-Null
     } else {
-        New-Item -Path $toolsPath -Name "hermes.exe" -ItemType File -Force
-    }
-
-    # TODO: remove - it was added for debugging purposes only
-    $flagsPath = "$OutputPath\build\native\flags\$Triplet"
-    if (!(Test-Path -Path $flagsPath)) {
-        New-Item -ItemType "directory" -Path $flagsPath | Out-Null
-    }
-    if (!$FakeBuild) {
-        Copy-Item "$buildPath\build.ninja" -Destination $flagsPath -force | Out-Null
-    } else {
-        New-Item -Path $flagsPath -Name "build.ninja" -ItemType File -Force
+        New-Item -Path $toolsPath -Name "hermes.exe" -ItemType File -Force | Out-Null
     }
 }
 
-function Copy-Headers($SourcesPath, $OutputPath) {
-
-    if (!(Test-Path -Path "$OutputPath\build\native\include\jsi")) {
-        New-Item -ItemType "directory" -Path "$OutputPath\build\native\include\jsi" | Out-Null
-    }
-
-    if (!(Test-Path -Path "$OutputPath\build\native\include\node-api")) {
-        New-Item -ItemType "directory" -Path "$OutputPath\build\native\include\node-api" | Out-Null
-    }
-
-    if (!(Test-Path -Path "$OutputPath\build\native\include\hermes")) {
-        New-Item -ItemType "directory" -Path "$OutputPath\build\native\include\hermes" | Out-Null
-    }
-
-    Copy-Item "$SourcesPath\API\jsi\jsi\*" -Destination "$OutputPath\build\native\include\jsi" -force -Recurse
-
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api.h" -Destination "$OutputPath\build\native\include\node-api" -force
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api_types.h" -Destination "$OutputPath\build\native\include\node-api" -force
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_runtime_api.h" -Destination "$OutputPath\build\native\include\node-api" -force
-
-    Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -force
-}
-
-function Invoke-PrepareNugetPackage($SourcesPath, $OutputPath) {
+function Invoke-PrepareNugetPackage() {
     $nugetPath = Join-Path $OutputPath "nuget"
-    if (!(Test-Path -Path $nugetPath)) {
-        New-Item -ItemType "directory" -Path $nugetPath | Out-Null
-    }
+    Invoke-EnsureDir $nugetPath
 
-    Copy-Headers $SourcesPath $OutputPath
+    Invoke-EnsureDir "$OutputPath\build\native\include\jsi"
+    Copy-Item "$SourcesPath\API\jsi\jsi\*" -Destination "$OutputPath\build\native\include\jsi" -Force -Recurse
+
+    Invoke-EnsureDir "$OutputPath\build\native\include\node-api"
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api.h" -Destination "$OutputPath\build\native\include\node-api" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api_types.h" -Destination "$OutputPath\build\native\include\node-api" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_runtime_api.h" -Destination "$OutputPath\build\native\include\node-api" -Force
+
+    Invoke-EnsureDir "$OutputPath\build\native\include\hermes"
+    Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -Force
 
     # Copy misc files for NuGet packaging.
     if (!(Test-Path -Path "$OutputPath\license")) {
         New-Item -ItemType "directory" -Path "$OutputPath\license" | Out-Null
     }
 
-    Copy-Item "$SourcesPath\LICENSE" -Destination "$OutputPath\license\" -force
-    Copy-Item "$SourcesPath\.ado\NOTICE.txt" -Destination "$OutputPath\license\" -force
-    Copy-Item "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -force
+    Copy-Item "$SourcesPath\LICENSE" -Destination "$OutputPath\license\" -Force
+    Copy-Item "$SourcesPath\.ado\NOTICE.txt" -Destination "$OutputPath\license\" -Force
+    Copy-Item "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -Force
 
     # To make the package UWP compatible
     if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
@@ -403,40 +367,75 @@ function Invoke-PrepareNugetPackage($SourcesPath, $OutputPath) {
     $npmPackage = (Get-Content (Join-Path $SourcesPath "npm\package.json") | Out-String | ConvertFrom-Json).version
 
     (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.nuspec") `
-        -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") `
+        -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
         | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.nuspec"
 
     (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.Fat.nuspec") `
-        -replace ('VERSION_DETAILS', "Hermes version: $npmPackage; Git revision: $gitRevision") `
+        -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
         | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.Fat.nuspec"
     
     $npmPackage | Set-Content "$OutputPath\version"
 }
 
+function Invoke-EnsureDir($Path) {
+    if (!(Test-Path -Path $Path)) {
+        New-Item -ItemType Directory -Path $Path | Out-Null
+    }
+}
+
+function Invoke-DeleteDir($Path) {
+    if (Test-Path -Path $Path) {
+        Remove-Item -Path $Path -Force -Recurse | Out-Null
+    }
+}
+
 Invoke-RemoveUnusedFilesForComponentGovernance
 $StartTime = (Get-Date)
 
+$SourcesPath = Resolve-Path $SourcesPath
+$WorkSpacePath = Resolve-Path $WorkSpacePath
+$OutputPath = Resolve-Path $OutputPath
+
+Write-Host "cibuild is invoke with parameters:"
+Write-Host "         SourcesPath: $SourcesPath"
+Write-Host "       WorkSpacePath: $WorkSpacePath"
+Write-Host "          OutputPath: $OutputPath"
+Write-Host "         AppPlatform: $AppPlatform"
+Write-Host "            Platform: $Platform"
+Write-Host "       Configuration: $Configuration"
+Write-Host "       ToolsPlatform: $ToolsPlatform"
+Write-Host "  ToolsConfiguration: $ToolsConfiguration"
+Write-Host "   WindowsSDKVersion: $WindowsSDKVersion"
+Write-Host "      ReleaseVersion: $ReleaseVersion"
+Write-Host "         FileVersion: $FileVersion"
+Write-Host "            RunTests: $RunTests"
+Write-Host "    IncrementalBuild: $IncrementalBuild"
+Write-Host "            UseNinja: $UseNinja"
+Write-Host "       ConfigureOnly: $ConfigureOnly"
+Write-Host "           SkipBuild: $SkipBuild"
+Write-Host "    SkipPrepareNuget: $SkipPrepareNuget"
+Write-Host "           FakeBuild: $FakeBuild"
+Write-Host ""
+
 $VCVARS_PATH = Find-VS-Path
 
-if (!(Test-Path -Path $WorkSpacePath)) {
-    New-Item -ItemType "directory" -Path $WorkSpacePath | Out-Null
-}
+Invoke-EnsureDir $WorkSpacePath
 
 Push-Location $WorkSpacePath
 try {
-    Invoke-UpdateReleaseVersion -SourcesPath $SourcesPath -ReleaseVersion $ReleaseVersion -FileVersion $FileVersion
+    Invoke-UpdateHermesVersion
 
     if (!$SkipBuild) {
         # run the actual builds and copy artifacts
         foreach ($Plat in $Platform) {
             foreach ($Config in $Configuration) {
-                Invoke-BuildAndCopy -SourcesPath $SourcesPath -WorkSpacePath $WorkSpacePath -OutputPath $OutputPath -Platform $Plat -Configuration $Config -AppPlatform $AppPlatform
+                Invoke-BuildAndCopy -Platform $Plat -Configuration $Config
             }
         }
     }
 
     if (!$SkipPrepareNuget) {
-      Invoke-PrepareNugetPackage -SourcesPath $SourcesPath -OutputPath $OutputPath
+      Invoke-PrepareNugetPackage
     }
 } finally {
     Pop-Location
