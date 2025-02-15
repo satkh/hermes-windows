@@ -30,7 +30,9 @@ parameters:
       BuildAppPlatform: win32
 
 jobs:
-  # Build libNode binaries per platform.
+  #=============================================================================
+  # Build hermes binaries
+  #=============================================================================
   - ${{ each MatrixEntry in parameters.BuildMatrix }}:
     - job: Build_Hermes_${{ MatrixEntry.Name }}
       displayName: Build Hermes ${{ MatrixEntry.Name }}
@@ -45,12 +47,11 @@ jobs:
         # To fake building hermes for faster debugging
         fakeBuild: true
 
-      ${{ if parameters.isPublish }}:
-        templateContext:
-          outputs:
-            - output: pipelineArtifact
-              artifactName: ${{ MatrixEntry.Name }}
-              targetPath: $(Build.StagingDirectory)\build
+      templateContext:
+        outputs:
+          - output: pipelineArtifact
+            artifactName: ${{ MatrixEntry.Name }}
+            targetPath: $(Build.StagingDirectory)\build
 
       steps:
         - task: PowerShell@2
@@ -128,3 +129,125 @@ jobs:
         - script: |
             ls -R $(Build.StagingDirectory)\build
           displayName: Show all files in the Build.StagingDirectory\build
+
+  #=============================================================================
+  # Create NuGet packages
+  #=============================================================================
+
+  - job: CreateNuGet
+    displayName: Create Nuget packages
+
+    dependsOn:
+      - Setup
+      - ${{ each MatrixEntry in parameters.BuildMatrix }}:
+        - buildLibNode_${{ MatrixEntry.Name }}
+
+    variables:
+      semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
+      fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+
+    templateContext:
+      outputs:
+        - output: pipelineArtifact
+          targetPath: $(Build.StagingDirectory)\build\pkg
+          artifactName: published-packages
+
+    steps:
+      - checkout: self
+
+      # The commit tag in the nuspec requires that we use at least nuget 4.6
+      - task: NuGetToolInstaller@0
+        inputs:
+          versionSpec: ">=4.6.0"
+
+      # Download hermes binaries built in previous job.
+      - ${{ each MatrixEntry in parameters.BuildMatrix }}:
+        - task: DownloadPipelineArtifact@2
+          displayName: Download ${{ MatrixEntry.Name }} hermes artifacts
+          inputs:
+            artifact: ${{ MatrixEntry.Name }}
+            path: $(Build.StagingDirectory)\build\nuget
+
+      # Prepare NuGet files
+      - task: PowerShell@2
+        displayName: Prepare NuGet files
+        inputs:
+          targetType: filePath
+          filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
+          arguments:
+            -SourcesPath:$(Build.SourcesDirectory)
+            -OutputPath:$(Build.StagingDirectory)\build\nuget
+            -ReleaseVersion:"$(semanticVersion)"
+            -FileVersion:"$(fileVersion)"
+            -SkipBuild
+
+      # Show all files prepared for the NuGet package creation.
+      - script: |
+          ls -R $(Build.StagingDirectory)/build
+        displayName: Show all files in the Build.StagingDirectory\build\nuget
+
+      # Prepare `Version` variable for the NuGet packages basd on the generated version file.
+      - task: PowerShell@2
+        inputs:
+          targetType: 'inline'
+          script: |
+            $Version = (Get-Content "$(Build.StagingDirectory)\build\version") | Out-String).Trim()
+            Write-Host "##vso[task.setvariable variable=Version]$Version"
+
+      # Create Microsoft.JavaScript.Hermes NuGet package.
+      - task: NuGetCommand@2
+        displayName: 'NuGet Pack'
+        inputs:
+          command: pack
+          packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.nuspec
+          packDestination: $(Build.StagingDirectory)\build\pkg
+          buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
+          versioningScheme: byEnvVar
+          versionEnvVar: Version
+
+      # Create Microsoft.JavaScript.Hermes NuGet.Fat package that includes PDB files.
+      - task: NuGetCommand@2
+        displayName: 'NuGet Fat Pack'
+        inputs:
+          command: pack
+          packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.Fat.nuspec
+          packDestination: $(Build.StagingDirectory)\build\pkg
+          buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
+          versioningScheme: byEnvVar
+          versionEnvVar: Version
+
+      # Sign the NuGet packages.
+      - ${{ if parameters.isPublish }}:
+        - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
+          displayName: CodeSign NuGets
+          condition: not(eq(variables['Build.Reason'], 'PullRequest'))
+          inputs:
+            connectedServiceName: 'ESRP-JSHost3'
+            appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+            appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+            authAKVName: 'OGX-JSHost-KV'
+            authCertName: 'OGX-JSHost-Auth4'
+            authSignCertName: 'OGX-JSHost-Sign3'
+            folderPath: $(Build.StagingDirectory)\build\pkg
+            pattern: |
+              **/Microsoft.JavaScript.Hermes.*.nupkg
+              **/Microsoft.JavaScript.Hermes.Fat.*.nupkg
+            useMinimatch: true
+            signConfigType: inlineSignParams
+            inlineOperation: |
+              [
+                {
+                  "KeyCode" : "CP-401405",
+                  "OperationCode" : "NuGetSign",
+                  "Parameters" : {},
+                  "ToolName" : "sign",
+                  "ToolVersion" : "1.0"
+                },
+                {
+                  "KeyCode" : "CP-401405",
+                  "OperationCode" : "NuGetVerify",
+                  "Parameters" : {},
+                  "ToolName" : "sign",
+                  "ToolVersion" : "1.0"
+                }
+              ]
