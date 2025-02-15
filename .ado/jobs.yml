@@ -191,7 +191,7 @@ jobs:
         inputs:
           targetType: 'inline'
           script: |
-            $Version = (Get-Content "$(Build.StagingDirectory)\build\nuget\version") | Out-String).Trim()
+            $Version = ((Get-Content "$(Build.StagingDirectory)\build\nuget\version") | Out-String).Trim()
             Write-Host "##vso[task.setvariable variable=Version]$Version"
 
       # Create Microsoft.JavaScript.Hermes NuGet package.
