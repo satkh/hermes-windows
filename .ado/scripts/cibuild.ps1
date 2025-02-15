@@ -53,7 +53,9 @@ function Invoke-Main() {
     $StartTime = (Get-Date)
 
     $SourcesPath = Resolve-Path $SourcesPath
+    Invoke-EnsureDir $WorkSpacePath
     $WorkSpacePath = Resolve-Path $WorkSpacePath
+    Invoke-EnsureDir $OutputPath
     $OutputPath = Resolve-Path $OutputPath
 
     Write-Host "cibuild is invoke with parameters:"
@@ -80,8 +82,6 @@ function Invoke-Main() {
     Invoke-RemoveUnusedFilesForComponentGovernance
 
     $VCVARS_PATH = Find-VS-Path
-
-    Invoke-EnsureDir $WorkSpacePath
 
     Push-Location $WorkSpacePath
     try {
@@ -231,11 +231,7 @@ function Invoke-PrepareNugetPackage() {
     Invoke-EnsureDir "$OutputPath\build\native\include\hermes"
     Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -Force
 
-    # Copy misc files for NuGet packaging.
-    if (!(Test-Path -Path "$OutputPath\license")) {
-        New-Item -ItemType "directory" -Path "$OutputPath\license" | Out-Null
-    }
-
+    Invoke-EnsureDir "$OutputPath\license"
     Copy-Item "$SourcesPath\LICENSE" -Destination "$OutputPath\license\" -Force
     Copy-Item "$SourcesPath\.ado\NOTICE.txt" -Destination "$OutputPath\license\" -Force
     Copy-Item "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -Force

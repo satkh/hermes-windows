@@ -66,6 +66,7 @@ jobs:
               -AppPlatform:${{ MatrixEntry.BuildAppPlatform }}
               -ReleaseVersion:"$(semanticVersion)"
               -FileVersion:"$(fileVersion)"
+              -SkipPrepareNuget
               -FakeBuild:$$(fakeBuild)
 
         - ${{ if ne(variables.FakeBuild, true) }}:
