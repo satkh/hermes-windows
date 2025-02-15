@@ -49,17 +49,72 @@ param(
     [switch]$FakeBuild
 )
 
-function Find-Path($exename) {
-    $exeName = (get-command $exename -ErrorAction SilentlyContinue)
-    if ($exeName.Path) {
-        return $exeName.Path
-    } else {
-        throw "Could not find $exename"
+function Invoke-Main() {
+    $StartTime = (Get-Date)
+
+    $SourcesPath = Resolve-Path $SourcesPath
+    $WorkSpacePath = Resolve-Path $WorkSpacePath
+    $OutputPath = Resolve-Path $OutputPath
+
+    Write-Host "cibuild is invoke with parameters:"
+    Write-Host "         SourcesPath: $SourcesPath"
+    Write-Host "       WorkSpacePath: $WorkSpacePath"
+    Write-Host "          OutputPath: $OutputPath"
+    Write-Host "         AppPlatform: $AppPlatform"
+    Write-Host "            Platform: $Platform"
+    Write-Host "       Configuration: $Configuration"
+    Write-Host "       ToolsPlatform: $ToolsPlatform"
+    Write-Host "  ToolsConfiguration: $ToolsConfiguration"
+    Write-Host "   WindowsSDKVersion: $WindowsSDKVersion"
+    Write-Host "      ReleaseVersion: $ReleaseVersion"
+    Write-Host "         FileVersion: $FileVersion"
+    Write-Host "            RunTests: $RunTests"
+    Write-Host "    IncrementalBuild: $IncrementalBuild"
+    Write-Host "            UseNinja: $UseNinja"
+    Write-Host "       ConfigureOnly: $ConfigureOnly"
+    Write-Host "           SkipBuild: $SkipBuild"
+    Write-Host "    SkipPrepareNuget: $SkipPrepareNuget"
+    Write-Host "           FakeBuild: $FakeBuild"
+    Write-Host ""
+
+    Invoke-RemoveUnusedFilesForComponentGovernance
+
+    $VCVARS_PATH = Find-VS-Path
+
+    Invoke-EnsureDir $WorkSpacePath
+
+    Push-Location $WorkSpacePath
+    try {
+        Invoke-UpdateHermesVersion
+
+        if (!$SkipBuild) {
+            # run the actual builds and copy artifacts
+            foreach ($Plat in $Platform) {
+                foreach ($Config in $Configuration) {
+                    Invoke-BuildAndCopy -Platform $Plat -Configuration $Config
+                }
+            }
+        }
+
+        if (!$SkipPrepareNuget) {
+          Invoke-PrepareNugetPackage
+        }
+    } finally {
+        Pop-Location
     }
+
+    $elapsedTime = $(get-date) - $StartTime
+    $totalTime = "{0:HH:mm:ss}" -f ([datetime]$elapsedTime.Ticks)
+    Write-Host "Build took $totalTime to run"
+    Write-Host ""
+}
+
+function Invoke-RemoveUnusedFilesForComponentGovernance() {
+    Invoke-DeleteDir ".\unsupported\juno"
 }
 
 function Find-VS-Path() {
-    $vsWhere = (get-command "vswhere.exe" -ErrorAction SilentlyContinue)
+    $vsWhere = (Get-Command "vswhere.exe" -ErrorAction SilentlyContinue)
     if ($vsWhere) {
         $vsWhere = $vsWhere.Path
     } else {
@@ -91,54 +146,6 @@ function Find-VS-Path() {
     }
 }
 
-function Get-VCVarsParam($plat = "x64", $arch = "win32") {
-    $args_ = switch ($plat)
-    {
-        "x64" {"x64"}
-        "x86" {"x64_x86"}
-        "arm64" {"x64_arm64"}
-        "arm64ec" {"x64_arm64"}
-        default { "x64" }
-    }
-
-    if ($arch -eq "uwp") {
-        $args_ = "$args_ uwp"
-    }
-
-    if ($WindowsSDKVersion) {
-        $args_ = "$args_ $WindowsSDKVersion"
-    }
-
-    # Spectre mitigations (for SDL)
-    $args_ = "$args_ -vcvars_spectre_libs=spectre"
-
-    return $args_
-}
-
-function Get-CMakeConfiguration($config) {
-    $val = switch ($config) {
-        "debug" {"FastDebug"}
-        "release" {"Release"}
-        default {"Debug"}
-    }
-
-    return $val
-}
-
-function Invoke-RemoveUnusedFilesForComponentGovernance() {
-    Invoke-DeleteDir ".\unsupported\juno"
-}
-
-function Invoke-Environment($Command, $arg) {
-    $Command = "`"" + $Command + "`" " + $arg
-    Write-Host "Running command [ $Command ]"
-    cmd /c "$Command && set" | . { process {
-        if ($_ -match "^([^=]+)=(.*)") {
-            [System.Environment]::SetEnvironmentVariable($matches[1], $matches[2])
-        }
-    }}
-}
-
 function Invoke-UpdateHermesVersion() {
     if ([String]::IsNullOrWhiteSpace($ReleaseVersion)) {
         return
@@ -167,123 +174,6 @@ function Invoke-UpdateHermesVersion() {
     Write-Host "Hermes version set to $hermesVersion"
 }
 
-function Get-CommonArgs($Platform, $Configuration, [ref]$GenArgs) {
-    if ($UseNinja) {
-        $GenArgs.Value += "-G Ninja"
-    } else {
-        # TODO: use VS version chosen before
-        $GenArgs.Value += "-G `"Visual Studio 17 2022`""
-        $cmakePlatform = $Platform;
-        if ($cmakePlatform -eq "x86") {
-            $cmakePlatform = "Win32";
-        }
-        $GenArgs.Value += "-A $cmakePlatform"
-    }
-
-    $cmakeConfiguration = Get-CMakeConfiguration $Configuration
-    $GenArgs.Value += "-DCMAKE_BUILD_TYPE=$cmakeConfiguration"
-
-    $GenArgs.Value += "-DHERMESVM_PLATFORM_LOGGING=On"
-
-    if (![String]::IsNullOrWhiteSpace($FileVersion)) {
-        $GenArgs.Value += "-DHERMES_FILE_VERSION=$FileVersion"
-    }
-}
-
-function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targets) {
-    # Retain the build folder for incremental builds only.
-    if (!$IncrementalBuild) {
-        Invoke-DeleteDir $BuildPath
-    }
-
-    Invoke-EnsureDir $BuildPath
-    Push-Location $BuildPath
-    try {
-        $genCall = ("cmake {0}" -f ($GenArgs -Join " ")) + " $SourcesPath"
-        Write-Host "genCall: $genCall"
-
-        $ninjaCall = ("ninja {0}" -f ($Targets -Join " "))
-        Write-Host "ninjaCall: $ninjaCall"
-
-        $genCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $genCall 2>&1"
-        Write-Host "Run command: $genCmd"
-        cmd /c $GenCmd
-
-        if ($ConfigureOnly) {
-            Write-Host "Exit: configure only"
-            exit 0;
-        }
-
-        $ninjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform $AppPlatform) && $ninjaCall 2>&1"
-        Write-Host "Run command: $ninjaCmd"
-        cmd /c $NinjaCmd
-    } finally {
-        Pop-Location
-    }
-}
-
-function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
-    $genArgs = @();
-    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
-
-    $targets = @("hermes","hermesc")
-
-    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
-}
-
-function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
-    $genArgs = @();
-    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
-
-    $genArgs += "-DHERMES_ENABLE_DEBUGGER=ON"
-    $genArgs += "-DHERMES_ENABLE_INTL=ON"
-
-    if ($AppPlatform -eq "uwp") {
-        # Link against default ICU libraries in Windows 10.
-        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF"
-    } else {
-        # Use our custom WinGlob/NLS based implementation of unicode stubs, to avoid depending on the runtime ICU library.
-        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON"
-    }
-
-    if ($AppPlatform -eq "uwp") {
-        $genArgs += "-DCMAKE_SYSTEM_NAME=WindowsStore"
-        $genArgs += "-DCMAKE_SYSTEM_VERSION=`"10.0.17763.0`""
-        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
-    } elseif ($Platform -eq "arm64" -or $Platform -eq "arm64ec") {
-        $genArgs += "-DHERMES_MSVC_ARM64=On"
-        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
-    }
-
-    if ($Platform -eq "arm64ec") {
-        $Env:CFLAGS = "-arm64EC"
-        $Env:CXXFLAGS = "-arm64EC"
-    }
-
-    $targets = @("libshared");
-
-    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
-}
-
-function Invoke-Test-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
-    $genArgs = @();
-    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
-
-    $genArgs += "-DHERMES_ENABLE_DEBUGGER=On"
-
-    if ($AppPlatform -eq "uwp") {
-        $genArgs += "-DCMAKE_SYSTEM_NAME=WindowsStore"
-        $genArgs += "-DCMAKE_SYSTEM_VERSION=`"10.0.17763`""
-    } elseif ($Platform -eq "arm64" -or $Platform -eq "arm64ec") {
-        $genArgs += "-DHERMES_MSVC_ARM64=On"
-        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
-    }
-
-    $targets = @("check-hermes");
-
-    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
-}
-
 function Invoke-BuildAndCopy($Platform, $Configuration) {
     Write-Host "Invoke-BuildAndCopy is called with Platform: $Platform, Configuration: $Configuration"
 
@@ -302,10 +192,6 @@ function Invoke-BuildAndCopy($Platform, $Configuration) {
           -Configuration $Configuration `
           -BuildPath $buildPath `
           -CompilerAndToolsBuildPath $compilerAndToolsBuildPath
-    }
-
-    if (!$FakeBuild -and $RunTests.IsPresent) {
-        Invoke-Test-Build $SourcesPath $buildPath $compilerAndToolsBuildPath $Platform $Configuration $AppPlatform
     }
 
     $finalOutputPath = "$OutputPath\lib\native\$AppPlatform\$Configuration\$Platform";
@@ -377,6 +263,141 @@ function Invoke-PrepareNugetPackage() {
     $npmPackage | Set-Content "$OutputPath\version"
 }
 
+function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
+    $genArgs = @();
+    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
+
+    $targets = @("hermes","hermesc")
+
+    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
+}
+
+function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
+    $genArgs = @();
+    Get-CommonArgs -Platform $Platform -Configuration $Configuration -GenArgs ([ref]$genArgs)
+
+    $genArgs += "-DHERMES_ENABLE_DEBUGGER=ON"
+    $genArgs += "-DHERMES_ENABLE_INTL=ON"
+
+    if ($AppPlatform -eq "uwp") {
+        # Link against default ICU libraries in Windows 10.
+        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF"
+    } else {
+        # Use our custom WinGlob/NLS based implementation of unicode stubs, to avoid depending on the runtime ICU library.
+        $genArgs += "-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON"
+    }
+
+    if ($AppPlatform -eq "uwp") {
+        $genArgs += "-DCMAKE_SYSTEM_NAME=WindowsStore"
+        $genArgs += "-DCMAKE_SYSTEM_VERSION=`"10.0.17763.0`""
+        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
+    } elseif ($Platform -eq "arm64" -or $Platform -eq "arm64ec") {
+        $genArgs += "-DHERMES_MSVC_ARM64=On"
+        $genArgs += "-DIMPORT_HERMESC=$CompilerAndToolsBuildPath\ImportHermesc.cmake"
+    }
+
+    if ($Platform -eq "arm64ec") {
+        $Env:CFLAGS = "-arm64EC"
+        $Env:CXXFLAGS = "-arm64EC"
+    }
+
+    $targets = @("libshared");
+    if ($RunTests) {
+        $targets += "check-hermes"
+    }
+
+    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
+}
+
+function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targets) {
+    # Retain the build folder for incremental builds only.
+    if (!$IncrementalBuild) {
+        Invoke-DeleteDir $BuildPath
+    }
+
+    Invoke-EnsureDir $BuildPath
+    Push-Location $BuildPath
+    try {
+        $genCall = ("cmake {0}" -f ($GenArgs -Join " ")) + " $SourcesPath"
+        Write-Host "genCall: $genCall"
+
+        $ninjaCall = ("ninja {0}" -f ($Targets -Join " "))
+        Write-Host "ninjaCall: $ninjaCall"
+
+        $genCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform) && $genCall 2>&1"
+        Write-Host "Run command: $genCmd"
+        cmd /c $GenCmd
+
+        if ($ConfigureOnly) {
+            Write-Host "Exit: configure only"
+            exit 0;
+        }
+
+        $ninjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform) && $ninjaCall 2>&1"
+        Write-Host "Run command: $ninjaCmd"
+        cmd /c $NinjaCmd
+    } finally {
+        Pop-Location
+    }
+}
+
+function Get-CommonArgs($Platform, $Configuration, [ref]$GenArgs) {
+    if ($UseNinja) {
+        $GenArgs.Value += "-G Ninja"
+    } else {
+        # TODO: use VS version chosen before
+        $GenArgs.Value += "-G `"Visual Studio 17 2022`""
+        $cmakePlatform = $Platform;
+        if ($cmakePlatform -eq "x86") {
+            $cmakePlatform = "Win32";
+        }
+        $GenArgs.Value += "-A $cmakePlatform"
+    }
+
+    $cmakeConfiguration = Get-CMakeConfiguration $Configuration
+    $GenArgs.Value += "-DCMAKE_BUILD_TYPE=$cmakeConfiguration"
+
+    $GenArgs.Value += "-DHERMESVM_PLATFORM_LOGGING=On"
+
+    if (![String]::IsNullOrWhiteSpace($FileVersion)) {
+        $GenArgs.Value += "-DHERMES_FILE_VERSION=$FileVersion"
+    }
+}
+
+function Get-CMakeConfiguration($config) {
+    $cmakeConfig =  switch ($config) {
+        "debug" {"FastDebug"}
+        "release" {"Release"}
+        default {"Debug"}
+    }
+
+    return $cmakeConfig;
+}
+
+function Get-VCVarsParam($Platform = "x64") {
+    $vcVars = switch ($Platform)
+    {
+        "x64" {"x64"}
+        "x86" {"x64_x86"}
+        "arm64" {"x64_arm64"}
+        "arm64ec" {"x64_arm64"}
+        default { "x64" }
+    }
+
+    if ($AppPlatform -eq "uwp") {
+        $vcVars = "$vcVars uwp"
+    }
+
+    if ($WindowsSDKVersion) {
+        $vcVars = "$vcVars $WindowsSDKVersion"
+    }
+
+    # Spectre mitigations (for SDL)
+    $vcVars = "$vcVars -vcvars_spectre_libs=spectre"
+
+    return $vcVars
+}
+
 function Invoke-EnsureDir($Path) {
     if (!(Test-Path -Path $Path)) {
         New-Item -ItemType Directory -Path $Path | Out-Null
@@ -389,58 +410,4 @@ function Invoke-DeleteDir($Path) {
     }
 }
 
-Invoke-RemoveUnusedFilesForComponentGovernance
-$StartTime = (Get-Date)
-
-$SourcesPath = Resolve-Path $SourcesPath
-$WorkSpacePath = Resolve-Path $WorkSpacePath
-$OutputPath = Resolve-Path $OutputPath
-
-Write-Host "cibuild is invoke with parameters:"
-Write-Host "         SourcesPath: $SourcesPath"
-Write-Host "       WorkSpacePath: $WorkSpacePath"
-Write-Host "          OutputPath: $OutputPath"
-Write-Host "         AppPlatform: $AppPlatform"
-Write-Host "            Platform: $Platform"
-Write-Host "       Configuration: $Configuration"
-Write-Host "       ToolsPlatform: $ToolsPlatform"
-Write-Host "  ToolsConfiguration: $ToolsConfiguration"
-Write-Host "   WindowsSDKVersion: $WindowsSDKVersion"
-Write-Host "      ReleaseVersion: $ReleaseVersion"
-Write-Host "         FileVersion: $FileVersion"
-Write-Host "            RunTests: $RunTests"
-Write-Host "    IncrementalBuild: $IncrementalBuild"
-Write-Host "            UseNinja: $UseNinja"
-Write-Host "       ConfigureOnly: $ConfigureOnly"
-Write-Host "           SkipBuild: $SkipBuild"
-Write-Host "    SkipPrepareNuget: $SkipPrepareNuget"
-Write-Host "           FakeBuild: $FakeBuild"
-Write-Host ""
-
-$VCVARS_PATH = Find-VS-Path
-
-Invoke-EnsureDir $WorkSpacePath
-
-Push-Location $WorkSpacePath
-try {
-    Invoke-UpdateHermesVersion
-
-    if (!$SkipBuild) {
-        # run the actual builds and copy artifacts
-        foreach ($Plat in $Platform) {
-            foreach ($Config in $Configuration) {
-                Invoke-BuildAndCopy -Platform $Plat -Configuration $Config
-            }
-        }
-    }
-
-    if (!$SkipPrepareNuget) {
-      Invoke-PrepareNugetPackage
-    }
-} finally {
-    Pop-Location
-}
-
-$elapsedTime = $(get-date) - $StartTime
-$totalTime = "{0:HH:mm:ss}" -f ([datetime]$elapsedTime.Ticks)
-Write-Host "Build took $totalTime to run"
+Invoke-Main
