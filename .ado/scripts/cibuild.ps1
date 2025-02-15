@@ -81,7 +81,7 @@ function Invoke-Main() {
 
     Invoke-RemoveUnusedFilesForComponentGovernance
 
-    $VCVARS_PATH = Find-VS-Path
+    $vcvarsall_bat = Find-VS-Path
 
     Push-Location $WorkSpacePath
     try {
@@ -182,8 +182,8 @@ function Invoke-BuildAndCopy($Platform, $Configuration) {
     $compilerPath = Join-Path $compilerAndToolsBuildPath "bin\hermesc.exe"
 
     # Build compiler if it doesn't exist (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !).
-    if (!$FakeBuild -and !(Test-Path -Path $compilerPath)) {
-        Invoke-Compiler-Build $SourcesPath $compilerAndToolsBuildPath $toolsPlatform $toolsConfiguration "win32" $True
+    if (!$FakeBuild -and !(Test-Path -Path $compilerPath) -and ($AppPlatform -eq "uwp")) {
+        Invoke-Compiler-Build -Platform $toolsPlatform -Configuration $toolsConfiguration -BuildPath $compilerAndToolsBuildPath
     }
 
     $buildPath = Join-Path $WorkSpacePath "build\$triplet"
@@ -233,8 +233,8 @@ function Invoke-PrepareNugetPackage() {
 
     Invoke-EnsureDir "$OutputPath\license"
     Copy-Item "$SourcesPath\LICENSE" -Destination "$OutputPath\license\" -Force
-    Copy-Item "$SourcesPath\.ado\NOTICE.txt" -Destination "$OutputPath\license\" -Force
-    Copy-Item "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\NOTICE.txt" -Destination "$OutputPath\license\" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -Force
 
     # To make the package UWP compatible
     if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
@@ -248,11 +248,11 @@ function Invoke-PrepareNugetPackage() {
 
     $npmPackage = (Get-Content (Join-Path $SourcesPath "npm\package.json") | Out-String | ConvertFrom-Json).version
 
-    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.nuspec") `
+    (Get-Content "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.nuspec") `
         -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
         | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.nuspec"
 
-    (Get-Content "$SourcesPath\.ado\Microsoft.JavaScript.Hermes.Fat.nuspec") `
+    (Get-Content "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.Fat.nuspec") `
         -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
         | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.Fat.nuspec"
     
@@ -265,7 +265,7 @@ function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
 
     $targets = @("hermes","hermesc")
 
-    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
+    Invoke-BuildImpl -AppPlatform "win32" -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
 }
 
 function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
@@ -302,10 +302,10 @@ function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToo
         $targets += "check-hermes"
     }
 
-    Invoke-BuildImpl -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
+    Invoke-BuildImpl -AppPlatform $AppPlatform -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
 }
 
-function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targets) {
+function Invoke-BuildImpl($AppPlatform, $Platform, $Configuration, $BuildPath, $GenArgs, $Targets) {
     # Retain the build folder for incremental builds only.
     if (!$IncrementalBuild) {
         Invoke-DeleteDir $BuildPath
@@ -320,7 +320,8 @@ function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targ
         $ninjaCall = ("ninja {0}" -f ($Targets -Join " "))
         Write-Host "ninjaCall: $ninjaCall"
 
-        $genCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform) && $genCall 2>&1"
+        $setVCVars = "`"$vcvarsall_bat`" $(Get-VCVarsParam $AppPlatform $Platform)"
+        $genCmd = "$setVCVars && $genCall 2>&1"
         Write-Host "Run command: $genCmd"
         cmd /c $GenCmd
 
@@ -329,7 +330,7 @@ function Invoke-BuildImpl($Platform, $Configuration, $BuildPath, $GenArgs, $Targ
             exit 0;
         }
 
-        $ninjaCmd = "`"$VCVARS_PATH`" $(Get-VCVarsParam $Platform) && $ninjaCall 2>&1"
+        $ninjaCmd = "$setVCVars && $ninjaCall 2>&1"
         Write-Host "Run command: $ninjaCmd"
         cmd /c $NinjaCmd
     } finally {
@@ -370,7 +371,7 @@ function Get-CMakeConfiguration($config) {
     return $cmakeConfig;
 }
 
-function Get-VCVarsParam($Platform = "x64") {
+function Get-VCVarsParam($AppPlatform, $Platform) {
     $vcVars = switch ($Platform)
     {
         "x64" {"x64"}

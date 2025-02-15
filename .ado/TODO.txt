@@ -1,0 +1,10 @@
+- Do not change source files when build locally
+- Move all Nuget related files to the Nuget folder
+- Implement running unit tests
+- Implement Nuget creation in the script
+- Simplify Nuget parameter substitution
+- Implement better versioning schema
+- Use JavaScript?
+
+- Implement PR pipeline
+- Implement Release pipeline
