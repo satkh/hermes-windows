@@ -140,7 +140,7 @@ jobs:
     dependsOn:
       - Setup
       - ${{ each MatrixEntry in parameters.BuildMatrix }}:
-        - buildLibNode_${{ MatrixEntry.Name }}
+        - Build_Hermes_${{ MatrixEntry.Name }}
 
     variables:
       semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
