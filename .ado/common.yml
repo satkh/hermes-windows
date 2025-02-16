@@ -29,6 +29,12 @@ parameters:
     TargetCPU: arm64ec
     BuildAppPlatform: win32
 
+variables:
+  -name: tags
+   value: production,externalfacing
+  -name: Is_Publish_Build
+   value: ${{ parameters.isPublish }}
+
 resources:
   repositories:
   - repository: OfficePipelineTemplates
