@@ -5,59 +5,7 @@ pr: none
 trigger:
   - main
 
-resources:
-  repositories:
-  - repository: OfficePipelineTemplates
-    type: git
-    name: 1ESPipelineTemplates/OfficePipelineTemplates
-    ref: refs/tags/release
-
-variables:
-  - name: tags
-    value: production,externalfacing
-  - name: Is_Publish_Build
-    value: ${{ variables.hermes_publish }}
-
 extends:
-  template: v1/Office.Official.PipelineTemplate.yml@OfficePipelineTemplates
-  parameters:
-    pool:
-      name: Azure-Pipelines-1ESPT-ExDShared
-      image: windows-latest
-      os: windows
-    sdl:
-      binskim:
-        analyzeTarget: $(Build.ArtifactStagingDirectory)/**/*.dll
-      componentgovernance:
-        ignoreDirectories: $(Build.SourcesDirectory)/website
-      eslint:
-        enableExclusions: true
-        # This repo does not ship any javascript code. But has many test cases for the js engine that fail parsing, have code considered insecure and crash eslint.
-        exclusionPatterns: |
-          '**/*.*'
-      suppression:
-        suppressionFile: $(Build.SourcesDirectory)\.ado\guardian\SDL\.gdnsuppress
-      codeql:
-        compiled:
-          enabled: true
-        runSourceLanguagesInSourceAnalysis: true
-
-    stages:
-    - stage: main
-      jobs:
-      - job: Setup
-        variables:
-          # Component Governance is ran as part of the Build Job.
-          - name: "skipComponentGovernanceDetection"
-            value: "true"
-        steps:
-          - script: node .ado\scripts\setVersionNumber.js
-            name: setVersions
-            displayName: Compute version numbers
-          - task: PowerShell@2
-            displayName: Show hermes publish vars
-            inputs:
-              targetType: 'inline'
-              script: |
-                Write-Host "hermes_publish: ${env:HERMES_PUBLISH}"
-                Write-Host "Is_Publish_Build: ${env:IS_PUBLISH_BUILD}"
+  template: common.yml@self
+   parameters:
+-    isPublish: true
