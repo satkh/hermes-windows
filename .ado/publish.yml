@@ -16,7 +16,7 @@ variables:
   - name: tags
     value: production,externalfacing
   - name: Is_Publish_Build
-    ${{ if $(hermes_publish) }}:
+    ${{ if eq(variables.hermes_publish, true) }}:
       value: true
     ${{ else }}:
       value: false
