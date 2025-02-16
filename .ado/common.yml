@@ -29,10 +29,6 @@ parameters:
     TargetCPU: arm64ec
     BuildAppPlatform: win32
 
-variables:
-  - name: tags
-    value: production,externalfacing
-
 resources:
   repositories:
   - repository: OfficePipelineTemplates
@@ -72,6 +68,8 @@ extends:
           # Component Governance is ran as part of the Build Job.
           - name: "skipComponentGovernanceDetection"
             value: "true"
+          - name: Is_Publish_Build
+            value: ${{ parameters.isPublish }}
         steps:
           - script: node .ado\scripts\setVersionNumber.js
             name: setVersions

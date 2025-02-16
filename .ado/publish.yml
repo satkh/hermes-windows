@@ -5,6 +5,10 @@ pr: none
 trigger:
   - main
 
+variables:
+  - name: tags
+    value: production,externalfacing
+
 extends:
   template: common.yml@self
   parameters:
