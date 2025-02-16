@@ -30,8 +30,8 @@ parameters:
     BuildAppPlatform: win32
 
 variables:
-  -name: tags
-   value: production,externalfacing
+  - name: tags
+    value: production,externalfacing
 
 resources:
   repositories:
