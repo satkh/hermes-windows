@@ -36,12 +36,6 @@ resources:
     name: 1ESPipelineTemplates/OfficePipelineTemplates
     ref: refs/tags/release
 
-variables:
-- name: tags
-  value: production,externalfacing
-- name: Is_Publish_Build
-  value: ${{ parameters.isPublish }}
-
 extends:
   template: v1/Office.Official.PipelineTemplate.yml@OfficePipelineTemplates
   parameters:
