@@ -1,15 +1,19 @@
-# Currently we use a temprorary versioning scheme where it starts with "0.1.".
-name: temp_0.1.$(Rev:r)
+#
+# Entry point for the CI builds that are run after merging PRs.
+#
+
+name: 0.0.$(Date:yyMM.d)$(Rev:rrr)
 
 pr: none
 trigger:
   - main
+  - rnw/*
 
 variables:
   - name: tags
     value: production,externalfacing
 
 extends:
-  template: common.yml@self
+  template: build-and-pack.yml@self
   parameters:
     isPublish: true
