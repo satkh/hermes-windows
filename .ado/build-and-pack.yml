@@ -140,7 +140,7 @@ extends:
             displayName: '[Test] - To be Added via bug #77'
 
           # Sign and publish symbolds only for the CI builds.
-          - ${{ if and(eq(parameters.isPublish, true), ne(variables.FakeBuild, true)) }}:
+          - ${{ if and(eq(parameters.MustPublish, true), ne(variables.FakeBuild, true)) }}:
             - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
               displayName: CodeSign Binaries
               inputs:
@@ -278,7 +278,7 @@ extends:
             versionEnvVar: Version
 
         # Sign the NuGet packages only for CI builds.
-        - ${{ if parameters.isPublish }}:
+        - ${{ if parameters.MustPublish }}:
           - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
             displayName: CodeSign NuGets
             inputs:
