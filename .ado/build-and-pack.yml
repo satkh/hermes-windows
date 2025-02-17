@@ -95,3 +95,219 @@ extends:
         steps:
         - script: node .ado\scripts\setVersionNumber.js
           displayName: Compute version numbers
+
+        #=============================================================================
+        # Build hermes binaries
+        #=============================================================================
+      - ${{ each MatrixEntry in parameters.BuildMatrix }}:
+        - job: Build_Hermes_${{ MatrixEntry.Name }}
+          displayName: Build Hermes ${{ MatrixEntry.Name }}
+
+          dependsOn:
+          - Set_Version_Number
+
+          timeoutInMinutes: 120
+
+          variables:
+            semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
+            fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+            # To fake building hermes for faster debugging
+            fakeBuild: true
+
+          templateContext:
+            outputs:
+            - output: pipelineArtifact
+              artifactName: ${{ MatrixEntry.Name }}
+              targetPath: $(Build.StagingDirectory)\build
+
+          steps:
+          - task: PowerShell@2
+            displayName: Build binaries
+            inputs:
+              targetType: filePath
+              filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
+              arguments:
+                -SourcesPath:$(Build.SourcesDirectory)
+                -OutputPath:$(Build.StagingDirectory)\build
+                -Platform:${{ MatrixEntry.TargetCPU }}
+                -Configuration:release
+                -AppPlatform:${{ MatrixEntry.BuildAppPlatform }}
+                -ReleaseVersion:"$(semanticVersion)"
+                -FileVersion:"$(fileVersion)"
+                -SkipPrepareNuget
+                -FakeBuild:$$(fakeBuild)
+          - script: echo TODO - Add Tests here
+            displayName: '[Test] - To be Added via bug #77'
+
+          # Sign and publish symbolds only for the CI builds.
+          - ${{ if and(eq(parameters.isPublish, true), ne(variables.FakeBuild, true)) }}:
+            - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
+              displayName: CodeSign Binaries
+              inputs:
+                connectedServiceName: 'ESRP-JSHost3'
+                appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+                appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+                authAKVName: 'OGX-JSHost-KV'
+                authCertName: 'OGX-JSHost-Auth4'
+                authSignCertName: 'OGX-JSHost-Sign3'
+                folderPath: $(Build.StagingDirectory)\build
+                # Recursively finds files matching these patterns:
+                pattern: |
+                  **/hermes.dll
+                  **/hermes.exe
+                  **/hermesc.exe
+                useMinimatch: true
+                signConfigType: inlineSignParams
+                inlineOperation: |
+                  [
+                    {
+                      "KeyCode" : "CP-230012",
+                      "OperationCode" : "SigntoolSign",
+                      "Parameters" : {
+                        "OpusName" : "Microsoft",
+                        "OpusInfo" : "http://www.microsoft.com",
+                        "FileDigest" : "/fd \"SHA256\"",
+                        "PageHash" : "/NPH",
+                        "TimeStamp" : "/tr \"http://rfc3161.gtm.corp.microsoft.com/TSS/HttpTspServer\" /td sha256"
+                      },
+                      "ToolName" : "sign",
+                      "ToolVersion" : "1.0"
+                    },
+                    {
+                      "KeyCode" : "CP-230012",
+                      "OperationCode" : "SigntoolVerify",
+                      "Parameters" : {},
+                      "ToolName" : "sign",
+                      "ToolVersion" : "1.0"
+                    }
+                  ]
+
+            # Make symbols available through http://symweb.
+            - task: PublishSymbols@2
+              displayName: Publish symbols
+              inputs:
+                SearchPattern: $(Build.StagingDirectory)/build/**/*.pdb
+                SymbolServerType: TeamServices
+                UseNetCoreClientTool: true
+
+      #=============================================================================
+      # Create NuGet packages
+      #=============================================================================
+
+      - job: Create_Hermes_NuGet
+        displayName: Create Nuget packages
+
+        dependsOn:
+        - Set_Version_Number
+        - ${{ each MatrixEntry in parameters.BuildMatrix }}:
+          - Build_Hermes_${{ MatrixEntry.Name }}
+
+        variables:
+          semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
+          fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+
+        templateContext:
+          outputs:
+          - output: pipelineArtifact
+            targetPath: $(Build.StagingDirectory)\build\pkg
+            artifactName: published-packages
+
+        steps:
+        - checkout: self
+
+        # The commit tag in the nuspec requires that we use at least nuget 4.6
+        - task: NuGetToolInstaller@0
+          inputs:
+            versionSpec: ">=4.6.0"
+
+        # Download hermes binaries built in previous job.
+        - ${{ each MatrixEntry in parameters.BuildMatrix }}:
+          - task: DownloadPipelineArtifact@2
+            displayName: Download ${{ MatrixEntry.Name }} hermes artifacts
+            inputs:
+              artifact: ${{ MatrixEntry.Name }}
+              path: $(Build.StagingDirectory)\build\nuget
+
+        # Prepare NuGet files
+        - task: PowerShell@2
+          displayName: Prepare NuGet files
+          inputs:
+            targetType: filePath
+            filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
+            arguments:
+              -SourcesPath:$(Build.SourcesDirectory)
+              -OutputPath:$(Build.StagingDirectory)\build\nuget
+              -ReleaseVersion:"$(semanticVersion)"
+              -FileVersion:"$(fileVersion)"
+              -SkipBuild
+
+        # Show all files prepared for the NuGet package creation.
+        - script: |
+            ls -R $(Build.StagingDirectory)/build
+          displayName: Show all files in the Build.StagingDirectory\build\nuget
+
+        # Prepare `Version` variable for the NuGet packages based on the generated version file.
+        - task: PowerShell@2
+          displayName: Prepare `Version` variable
+          inputs:
+            targetType: 'inline'
+            script: |
+              $Version = ((Get-Content "$(Build.StagingDirectory)\build\nuget\version") | Out-String).Trim()
+              Write-Host "##vso[task.setvariable variable=Version]$Version"
+
+        # Create Microsoft.JavaScript.Hermes NuGet package.
+        - task: NuGetCommand@2
+          displayName: 'NuGet Pack'
+          inputs:
+            command: pack
+            packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.nuspec
+            packDestination: $(Build.StagingDirectory)\build\pkg
+            buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
+            versioningScheme: byEnvVar
+            versionEnvVar: Version
+
+        # Create Microsoft.JavaScript.Hermes NuGet.Fat package that includes PDB files.
+        - task: NuGetCommand@2
+          displayName: 'NuGet Fat Pack'
+          inputs:
+            command: pack
+            packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.Fat.nuspec
+            packDestination: $(Build.StagingDirectory)\build\pkg
+            buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
+            versioningScheme: byEnvVar
+            versionEnvVar: Version
+
+        # Sign the NuGet packages only for CI builds.
+        - ${{ if parameters.isPublish }}:
+          - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
+            displayName: CodeSign NuGets
+            inputs:
+              connectedServiceName: 'ESRP-JSHost3'
+              appRegistrationClientId: '0a35e01f-eadf-420a-a2bf-def002ba898d'
+              appRegistrationTenantId: 'cdc5aeea-15c5-4db6-b079-fcadd2505dc2'
+              authAKVName: 'OGX-JSHost-KV'
+              authCertName: 'OGX-JSHost-Auth4'
+              authSignCertName: 'OGX-JSHost-Sign3'
+              folderPath: $(Build.StagingDirectory)\build\pkg
+              pattern: |
+                **/Microsoft.JavaScript.Hermes.*.nupkg
+                **/Microsoft.JavaScript.Hermes.Fat.*.nupkg
+              useMinimatch: true
+              signConfigType: inlineSignParams
+              inlineOperation: |
+                [
+                  {
+                    "KeyCode" : "CP-401405",
+                    "OperationCode" : "NuGetSign",
+                    "Parameters" : {},
+                    "ToolName" : "sign",
+                    "ToolVersion" : "1.0"
+                  },
+                  {
+                    "KeyCode" : "CP-401405",
+                    "OperationCode" : "NuGetVerify",
+                    "Parameters" : {},
+                    "ToolName" : "sign",
+                    "ToolVersion" : "1.0"
+                  }
+                ]
