@@ -2,6 +2,7 @@
 # Entry point for the PR builds that are run to validate PR.
 #
 
+# The name is parsed by setVersionNumber.js script which then updates the name of the run.
 name: 0.0.$(Date:yyMM.d)$(Rev:rrr)
 
 trigger: none
@@ -13,4 +14,4 @@ extends:
   template: build-and-pack.yml@self
   parameters:
     # Make sure that the PR builds do not publish signed packages.
-    isPublish: false
+    MustPublish: false

@@ -2,7 +2,9 @@
 # Entry point for the CI builds that are run after merging PRs.
 #
 
-# The release branch versions start with the release number
+# The name is parsed by setVersionNumber.js script which then updates the name of the run.
+#
+# The release branch versions "rnw/*" start with the release number
 # such as "0.69." or "0.70." and follow the revision number.
 # name: 0.70.$(Rev:r)
 #
@@ -22,4 +24,4 @@ variables:
 extends:
   template: build-and-pack.yml@self
   parameters:
-    isPublish: true
+    MustPublish: true

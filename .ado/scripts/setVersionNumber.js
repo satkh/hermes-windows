@@ -9,7 +9,7 @@
 const env = process.env;
 
 function main() {
-  const isPublish = env["IsPublish"]
+  const MustPublish = env["MustPublish"];
   console.log(`IsPublish: ${isPublish}`);
 
   const { semanticVersion, fileVersion } = computeVersion();
