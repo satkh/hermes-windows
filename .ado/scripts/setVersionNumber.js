@@ -9,11 +9,8 @@
 const env = process.env;
 
 function main() {
-  if (env["Build_Reason"] === "PullRequest") {
-    fatalError(
-      "Build script is intended for CI pipeline and should not be used for pull requests."
-    );
-  }
+  const isPublish = env["IsPublish"]
+  console.log(`IsPublish: ${isPublish}`);
 
   const { semanticVersion, fileVersion } = computeVersion();
   console.log(`Semantic Version: ${semanticVersion}`);
@@ -38,17 +35,45 @@ function main() {
 function computeVersion() {
   // Compute base version;
   const sourceBranch = env["Build_SourceBranch"];
-  if (sourceBranch === "refs/heads/main" ||
-    sourceBranch === "refs/heads/user/vmorozov/1es-pt-migration-microsoft.hermes-windows.ci") {
+  if (sourceBranch === "refs/heads/main") {
+    return computeCanaryVersion();
+  }
+  if (sourceBranch.includes("1es-pt-migration")) {
+    return computeCanaryVersion();
+  }
+  if (sourceBranch.startsWith("refs/heads/rnw/0.")) {
     return computeReleaseVersion();
   }
+
   fatalError(`Build script does not support source branch '${sourceBranch}'.`);
 }
 
+function computeCanaryVersion() {
+  const buildNumber = env["Build_BuildNumber"];
+  const buildNumberParts = buildNumber.split(".");
+  if (
+    buildNumberParts.length !== 4 ||
+    buildNumberParts[0] !== "0" ||
+    buildNumberParts[1] !== "0" ||
+    buildNumberParts[2].length !== 4 ||
+    buildNumberParts[3].length < 4 ||
+    buildNumberParts[3].length > 5
+  ) {
+    fatalError(
+      `Unexpected pre-release build number format encountered: ${buildNumber}`
+    );
+  }
+
+  const shortGitHash = env["Build_SourceVersion"].substring(0, 8);
+
+  return {
+    semanticVersion: `0.0.0-${buildNumberParts[2]}.${buildNumberParts[3]}-${shortGitHash}`,
+    fileVersion: buildNumber,
+  };
+}
+
 function computeReleaseVersion() {
-  let buildNumber = env["Build_BuildNumber"];
-  if (buildNumber.startsWith("temp_")) 
-    buildNumber = buildNumber.substring(5);
+  const buildNumber = env["Build_BuildNumber"];
   const buildNumberParts = buildNumber.split(".");
   if (buildNumberParts.length !== 3) {
     fatalError(

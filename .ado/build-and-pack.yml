@@ -4,11 +4,12 @@
 #
 
 parameters:
-- name: isPublish # True for the CI builds
+  # IsPublish is `true` for CI builds and `false` for PR validation.
+- name: IsPublish
   type: boolean
-  default : false
+  default: false
 
-# Matrix with target platforms.
+  # Matrix with target platforms for Hermes binaries.
 - name: BuildMatrix
   type: object
   default:
@@ -30,18 +31,23 @@ parameters:
   - Name: win32_arm64
     TargetCPU: arm64
     BuildAppPlatform: win32
-  - Name: win32_arm64ec
+    # ARM64 "Emulation Compatible" is to run ARM64 Hermes DLL in a x64 app
+    # on Windows ARM64 in emulation mode.
+    # See: https://learn.microsoft.com/en-us/windows/arm/arm64ec
+  - Name: win32_arm64ec 
     TargetCPU: arm64ec
     BuildAppPlatform: win32
 
 resources:
   repositories:
+    # The repo for the Office compliant build pipeline templates.
   - repository: OfficePipelineTemplates
     type: git
     name: 1ESPipelineTemplates/OfficePipelineTemplates
     ref: refs/tags/release
 
 extends:
+  # Extend the Office compliant build pipeline template.
   template: v1/Office.Official.PipelineTemplate.yml@OfficePipelineTemplates
   parameters:
     pool:
@@ -50,12 +56,15 @@ extends:
       os: windows
     sdl:
       binskim:
-        analyzeTarget: $(Build.ArtifactStagingDirectory)/**/*.dll
+        analyzeTarget: |
+          $(Build.StagingDirectory)\build\**\*.dll
+          $(Build.StagingDirectory)\build\**\*.exe
       componentgovernance:
-        ignoreDirectories: $(Build.SourcesDirectory)/website
+        ignoreDirectories: $(Build.SourcesDirectory)\website
       eslint:
         enableExclusions: true
-        # This repo does not ship any javascript code. But has many test cases for the js engine that fail parsing, have code considered insecure and crash eslint.
+        # This repo does not ship any JavaScript code. But it has many test cases for
+        # the Hermes JS engine that fail parsing, have code considered insecure and crash eslint.
         exclusionPatterns: |
           '**/*.*'
       suppression:
