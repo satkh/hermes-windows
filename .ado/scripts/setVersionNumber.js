@@ -12,34 +12,41 @@ function main() {
   const mustPublish = env["MustPublish"];
   console.log(`MustPublish: ${mustPublish}`);
 
-  const { semanticVersion, fileVersion } = computeVersion();
+  const { semanticVersion, fileVersion, isTest } = computeVersion();
   console.log(`Semantic Version: ${semanticVersion}`);
   console.log(`Windows File Version: ${fileVersion}`);
 
+  const testPrefix = isTest ? "Test " : "";
+  const publishPrefix = mustPublish ? "CI " : "PR ";
   if (!fileVersion.startsWith(semanticVersion)) {
     // Update the pipeline build number to correlate it with the semantic version.
     console.log(
-      `##vso[build.updatebuildnumber]${fileVersion} -- ${semanticVersion}`
+      "##vso[build.updateBuildNumber]" +
+        `${testPrefix}${publishPrefix}${fileVersion} -- ${semanticVersion}`
     );
   }
 
   // Set the variables (as output) so that other jobs can use them.
   console.log(
-    `##vso[task.setvariable variable=semanticVersion;isOutput=true]${semanticVersion}`
+    `##vso[task.setVariable variable=semanticVersion;isOutput=true]${semanticVersion}`
   );
   console.log(
-    `##vso[task.setvariable variable=fileVersion;isOutput=true]${fileVersion}`
+    `##vso[task.setVariable variable=fileVersion;isOutput=true]${fileVersion}`
   );
 }
 
-function computeVersion() {
-  // Compute base version;
+function computeVersion(mustPublish) {
   const sourceBranch = env["Build_SourceBranch"];
-  if (sourceBranch === "refs/heads/main") {
-    return computeCanaryVersion();
+  const isTest = sourceBranch.includes("1es-pt-migration");
+
+  if (isTest) {
+    return computeCanaryVersion(/*isTest:*/ true);
   }
-  if (sourceBranch.includes("1es-pt-migration")) {
-    return computeCanaryVersion();
+  if (!mustPublish) {
+    return computeCanaryVersion(/*isTest:*/ false);
+  }
+  if (sourceBranch === "refs/heads/main") {
+    return computeCanaryVersion(/*isTest:*/ false);
   }
   if (sourceBranch.startsWith("refs/heads/rnw/0.")) {
     return computeReleaseVersion();
@@ -48,7 +55,7 @@ function computeVersion() {
   fatalError(`Build script does not support source branch '${sourceBranch}'.`);
 }
 
-function computeCanaryVersion() {
+function computeCanaryVersion(isTest) {
   const buildNumber = env["Build_BuildNumber"];
   const buildNumberParts = buildNumber.split(".");
   if (
@@ -67,8 +74,11 @@ function computeCanaryVersion() {
   const shortGitHash = env["Build_SourceVersion"].substring(0, 8);
 
   return {
-    semanticVersion: `0.0.0-${buildNumberParts[2]}.${buildNumberParts[3]}-${shortGitHash}`,
+    semanticVersion:
+      "0.0.0-" +
+      `${buildNumberParts[2]}.${buildNumberParts[3]}-${shortGitHash}`,
     fileVersion: buildNumber,
+    isTest,
   };
 }
 
@@ -84,6 +94,7 @@ function computeReleaseVersion() {
   return {
     semanticVersion: buildNumber,
     fileVersion: buildNumber + ".0",
+    isTest: false,
   };
 }
 
