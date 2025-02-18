@@ -79,38 +79,39 @@ extends:
       jobs:
 
         #=============================================================================
-        # Set version number
+        # Set version number.
         #=============================================================================
-      - job: Set_Version_Number
-        displayName: Set Version Number
+      - job: Set_Versions
+        displayName: Set semantic and file versions
 
         variables:
           # Component Governance is ran as part of the Build Job.
         - name: skipComponentGovernanceDetection
           value: true
-          # Convert MustPublish parameter to a variable to access in script
+          # Convert MustPublish parameter to a variable to access it in script.
         - name: mustPublish
           value: ${{ parameters.MustPublish }}
 
         steps:
         - script: node .ado\scripts\setVersionNumber.js
+          name: setVersions # For output variable prefix
           displayName: Compute version numbers
 
         #=============================================================================
-        # Build hermes binaries
+        # Build hermes binaries.
         #=============================================================================
       - ${{ each MatrixEntry in parameters.BuildMatrix }}:
         - job: Build_Hermes_${{ MatrixEntry.Name }}
           displayName: Build Hermes ${{ MatrixEntry.Name }}
 
           dependsOn:
-          - Set_Version_Number
+          - Set_Versions
 
           timeoutInMinutes: 120
 
           variables:
-            semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
-            fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+            semanticVersion: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
+            fileVersion: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
             # To fake building hermes for faster debugging
             fakeBuild: true
 
@@ -134,12 +135,13 @@ extends:
                 -AppPlatform:${{ MatrixEntry.BuildAppPlatform }}
                 -ReleaseVersion:"$(semanticVersion)"
                 -FileVersion:"$(fileVersion)"
-                -SkipPrepareNuget
-                -FakeBuild:$$(fakeBuild)
+                -NoPack
+                -FakeBuild:$$(fakeBuild) 
+
           - script: echo TODO - Add Tests here
             displayName: '[Test] - To be Added via bug #77'
 
-          # Sign and publish symbolds only for the CI builds.
+          # Sign and publish symbols only for the CI builds.
           - ${{ if and(eq(parameters.MustPublish, true), ne(variables.FakeBuild, true)) }}:
             - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
               displayName: CodeSign Binaries
@@ -153,9 +155,9 @@ extends:
                 folderPath: $(Build.StagingDirectory)\build
                 # Recursively finds files matching these patterns:
                 pattern: |
-                  **/hermes.dll
-                  **/hermes.exe
-                  **/hermesc.exe
+                  $(Build.StagingDirectory)\build\**\hermes.dll
+                  $(Build.StagingDirectory)\build\**\hermes.exe
+                  $(Build.StagingDirectory)\build\**\hermesc.exe
                 useMinimatch: true
                 signConfigType: inlineSignParams
                 inlineOperation: |
@@ -186,7 +188,7 @@ extends:
             - task: PublishSymbols@2
               displayName: Publish symbols
               inputs:
-                SearchPattern: $(Build.StagingDirectory)/build/**/*.pdb
+                SearchPattern: $(Build.StagingDirectory)\build\**\*.pdb
                 SymbolServerType: TeamServices
                 UseNetCoreClientTool: true
 
@@ -198,13 +200,13 @@ extends:
         displayName: Create Nuget packages
 
         dependsOn:
-        - Set_Version_Number
+        - Set_Versions
         - ${{ each MatrixEntry in parameters.BuildMatrix }}:
           - Build_Hermes_${{ MatrixEntry.Name }}
 
         variables:
-          semanticVersion: $[ dependencies.Setup.outputs['setVersions.semanticVersion'] ]
-          fileVersion: $[ dependencies.Setup.outputs['setVersions.fileVersion'] ]
+          semanticVersion: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
+          fileVersion: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
 
         templateContext:
           outputs:
@@ -213,9 +215,7 @@ extends:
             artifactName: published-packages
 
         steps:
-        - checkout: self
-
-        # The commit tag in the nuspec requires that we use at least nuget 4.6
+        # The substitution tags in the nuspec require that we use at least nuget 4.6.
         - task: NuGetToolInstaller@0
           inputs:
             versionSpec: ">=4.6.0"
@@ -226,56 +226,20 @@ extends:
             displayName: Download ${{ MatrixEntry.Name }} hermes artifacts
             inputs:
               artifact: ${{ MatrixEntry.Name }}
-              path: $(Build.StagingDirectory)\build\nuget
+              path: $(Build.StagingDirectory)\build
 
-        # Prepare NuGet files
+        # Create NuGet packages.
         - task: PowerShell@2
-          displayName: Prepare NuGet files
+          displayName: Create NuGet packages
           inputs:
             targetType: filePath
             filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
             arguments:
               -SourcesPath:$(Build.SourcesDirectory)
-              -OutputPath:$(Build.StagingDirectory)\build\nuget
+              -OutputPath:$(Build.StagingDirectory)\build
               -ReleaseVersion:"$(semanticVersion)"
               -FileVersion:"$(fileVersion)"
-              -SkipBuild
-
-        # Show all files prepared for the NuGet package creation.
-        - script: |
-            ls -R $(Build.StagingDirectory)/build
-          displayName: Show all files in the Build.StagingDirectory\build\nuget
-
-        # Prepare `Version` variable for the NuGet packages based on the generated version file.
-        - task: PowerShell@2
-          displayName: Prepare `Version` variable
-          inputs:
-            targetType: 'inline'
-            script: |
-              $Version = ((Get-Content "$(Build.StagingDirectory)\build\nuget\version") | Out-String).Trim()
-              Write-Host "##vso[task.setvariable variable=Version]$Version"
-
-        # Create Microsoft.JavaScript.Hermes NuGet package.
-        - task: NuGetCommand@2
-          displayName: 'NuGet Pack'
-          inputs:
-            command: pack
-            packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.nuspec
-            packDestination: $(Build.StagingDirectory)\build\pkg
-            buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
-            versioningScheme: byEnvVar
-            versionEnvVar: Version
-
-        # Create Microsoft.JavaScript.Hermes NuGet.Fat package that includes PDB files.
-        - task: NuGetCommand@2
-          displayName: 'NuGet Fat Pack'
-          inputs:
-            command: pack
-            packagesToPack: $(Build.StagingDirectory)\build\nuget\Microsoft.JavaScript.Hermes.Fat.nuspec
-            packDestination: $(Build.StagingDirectory)\build\pkg
-            buildProperties: CommitId=$(Build.SourceVersion);nugetroot=$(Build.StagingDirectory)\build\nuget;RepoUri=$(Build.Repository.Uri)
-            versioningScheme: byEnvVar
-            versionEnvVar: Version
+              -NoBuild
 
         # Sign the NuGet packages only for CI builds.
         - ${{ if parameters.MustPublish }}:
@@ -290,8 +254,7 @@ extends:
               authSignCertName: 'OGX-JSHost-Sign3'
               folderPath: $(Build.StagingDirectory)\build\pkg
               pattern: |
-                **/Microsoft.JavaScript.Hermes.*.nupkg
-                **/Microsoft.JavaScript.Hermes.Fat.*.nupkg
+                $(Build.StagingDirectory)\build\pkg\Microsoft.JavaScript.Hermes.*.nupkg
               useMinimatch: true
               signConfigType: inlineSignParams
               inlineOperation: |

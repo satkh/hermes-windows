@@ -17,7 +17,7 @@ param(
     [String]$ToolsConfiguration = @("release"), # Platform used for building tools when cross compiling
     
     [ValidateSet("debug", "release")]
-    [String[]]$Configuration = @("debug"),
+    [String[]]$Configuration = @("release"),
     
     [ValidateSet("win32", "uwp")]
     [String]$AppPlatform = "uwp",
@@ -35,14 +35,13 @@ param(
 
     [switch]$RunTests,
     [switch]$IncrementalBuild,
-    [switch]$UseNinja = $true,
     [switch]$ConfigureOnly,
     
     # Do not build binaries. Use it to split the build and prepare script steps.
-    [switch]$SkipBuild,
+    [switch]$NoBuild,
 
     # Do not run the prepare NuGet script. Use it to split the build and prepare script steps.
-    [switch]$SkipPrepareNuget,
+    [switch]$NoPack,
 
     # Do not build binaries and instead replace them with fake files.
     # Use it for faster debugging the rest of the code.
@@ -72,10 +71,9 @@ function Invoke-Main() {
     Write-Host "         FileVersion: $FileVersion"
     Write-Host "            RunTests: $RunTests"
     Write-Host "    IncrementalBuild: $IncrementalBuild"
-    Write-Host "            UseNinja: $UseNinja"
     Write-Host "       ConfigureOnly: $ConfigureOnly"
-    Write-Host "           SkipBuild: $SkipBuild"
-    Write-Host "    SkipPrepareNuget: $SkipPrepareNuget"
+    Write-Host "             NoBuild: $NoBuild"
+    Write-Host "              NoPack: $NoPack"
     Write-Host "           FakeBuild: $FakeBuild"
     Write-Host ""
 
@@ -87,7 +85,7 @@ function Invoke-Main() {
     try {
         Invoke-UpdateHermesVersion
 
-        if (!$SkipBuild) {
+        if (!$NoBuild) {
             # run the actual builds and copy artifacts
             foreach ($Plat in $Platform) {
                 foreach ($Config in $Configuration) {
@@ -96,8 +94,8 @@ function Invoke-Main() {
             }
         }
 
-        if (!$SkipPrepareNuget) {
-          Invoke-PrepareNugetPackage
+        if (!$NoPack) {
+          Invoke-CreateNugetPackage
         }
     } finally {
         Pop-Location
@@ -216,9 +214,9 @@ function Invoke-BuildAndCopy($Platform, $Configuration) {
     }
 }
 
-function Invoke-PrepareNugetPackage() {
-    $nugetPath = Join-Path $OutputPath "nuget"
-    Invoke-EnsureDir $nugetPath
+function Invoke-CreateNugetPackage() {
+    Invoke-EnsureDir "$OutputPath\lib\native\win32\release"
+    Invoke-EnsureDir "$OutputPath\lib\native\uwp\release"
 
     Invoke-EnsureDir "$OutputPath\build\native\include\jsi"
     Copy-Item "$SourcesPath\API\jsi\jsi\*" -Destination "$OutputPath\build\native\include\jsi" -Force -Recurse
@@ -232,9 +230,16 @@ function Invoke-PrepareNugetPackage() {
     Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -Force
 
     Invoke-EnsureDir "$OutputPath\license"
-    Copy-Item "$SourcesPath\LICENSE" -Destination "$OutputPath\license\" -Force
-    Copy-Item "$SourcesPath\.ado\Nuget\NOTICE.txt" -Destination "$OutputPath\license\" -Force
-    Copy-Item "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.targets" -Destination "$OutputPath\build\native\Microsoft.JavaScript.Hermes.targets" -Force
+    Copy-Item "$SourcesPath\LICENSE" `
+        -Destination "$OutputPath\license\" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\NOTICE.txt" `
+        -Destination "$OutputPath\license\" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.props" `
+        -Destination "$OutputPath\build\native\" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.targets" `
+        -Destination "$OutputPath\build\native\" -Force
+    Copy-Item "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.nuspec" `
+        -Destination "$OutputPath\" -Force
 
     # To make the package UWP compatible
     if (!(Test-Path -Path "$OutputPath\lib\uap\")) {
@@ -242,21 +247,35 @@ function Invoke-PrepareNugetPackage() {
         New-Item -Path "$OutputPath\lib\uap\" -Name "_._" -ItemType File
     }
 
-    # Process version information
+    $pkgPath = Join-Path $OutputPath "pkg"
+    Invoke-EnsureDir $pkgPath
 
-    $gitRevision = ((git rev-parse --short HEAD) | Out-String).Trim()
+    $packageVersion = $ReleaseVersion
+    $repoUrl = "https://github.com/microsoft/hermes-windows"
+    $repoBranch = ((git rev-parse --abbrev-ref HEAD) | Out-String).Trim()
+    $repoCommit = ((git rev-parse HEAD) | Out-String).Trim()    
+    $baseProperties = "nugetroot=$OutputPath"`
+        + ";version=$packageVersion"`
+        + ";repoUrl=$repoUrl"`
+        + ";repoBranch=$repoBranch"`
+        + ";repoCommit=$repoCommit"
+    $packageProperties = $baseProperties`
+        + ";fat_suffix="`
+        + ";exclude_bin_files=**\*.pdb"
+    $fatPackageProperties = $baseProperties`
+        + ";fat_suffix=.Fat"`
+        + ";exclude_bin_files=*.txt"
 
-    $npmPackage = (Get-Content (Join-Path $SourcesPath "npm\package.json") | Out-String | ConvertFrom-Json).version
+    $nugetPackBaseCmd = "nuget pack `"$OutputPath\Microsoft.JavaScript.Hermes.nuspec`""`
+        + " -OutputDirectory `"$pkgPath`""`
+        + " -NoDefaultExcludes"
+    $nugetPackCmd = $nugetPackBaseCmd + " -Properties `"$packageProperties`""
+    Write-Host "Run command: $nugetPackCmd"
+    cmd /c $nugetPackCmd
 
-    (Get-Content "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.nuspec") `
-        -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
-        | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.nuspec"
-
-    (Get-Content "$SourcesPath\.ado\Nuget\Microsoft.JavaScript.Hermes.Fat.nuspec") `
-        -replace ("VERSION_DETAILS", "Hermes version: $npmPackage; Git revision: $gitRevision") `
-        | Set-Content "$OutputPath\Microsoft.JavaScript.Hermes.Fat.nuspec"
-    
-    $npmPackage | Set-Content "$OutputPath\version"
+    $fatNugetPackCmd = $nugetPackBaseCmd + " -Properties `"$fatPackageProperties`""
+    Write-Host "Run command: $fatNugetPackCmd"
+    cmd /c $fatNugetPackCmd
 }
 
 function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
@@ -339,17 +358,7 @@ function Invoke-BuildImpl($AppPlatform, $Platform, $Configuration, $BuildPath, $
 }
 
 function Get-CommonArgs($Platform, $Configuration, [ref]$GenArgs) {
-    if ($UseNinja) {
-        $GenArgs.Value += "-G Ninja"
-    } else {
-        # TODO: use VS version chosen before
-        $GenArgs.Value += "-G `"Visual Studio 17 2022`""
-        $cmakePlatform = $Platform;
-        if ($cmakePlatform -eq "x86") {
-            $cmakePlatform = "Win32";
-        }
-        $GenArgs.Value += "-A $cmakePlatform"
-    }
+    $GenArgs.Value += "-G Ninja"
 
     $cmakeConfiguration = Get-CMakeConfiguration $Configuration
     $GenArgs.Value += "-DCMAKE_BUILD_TYPE=$cmakeConfiguration"
