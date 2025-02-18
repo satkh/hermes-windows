@@ -113,7 +113,7 @@ extends:
             semanticVersion: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
             fileVersion: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
             # To fake building hermes for faster debugging
-            fakeBuild: true
+            fakeBuild: false
 
           templateContext:
             outputs:

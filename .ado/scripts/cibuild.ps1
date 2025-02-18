@@ -179,9 +179,13 @@ function Invoke-BuildAndCopy($Platform, $Configuration) {
     $compilerAndToolsBuildPath = Join-Path $WorkSpacePath "build\tools"
     $compilerPath = Join-Path $compilerAndToolsBuildPath "bin\hermesc.exe"
 
-    # Build compiler if it doesn't exist (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !).
+    # Build compiler if it doesn't exist 
+    # (TODO::To be precise, we need it only when building for uwp i.e. cross compilation !).
     if (!$FakeBuild -and !(Test-Path -Path $compilerPath) -and ($AppPlatform -eq "uwp")) {
-        Invoke-Compiler-Build -Platform $toolsPlatform -Configuration $toolsConfiguration -BuildPath $compilerAndToolsBuildPath
+        Invoke-Compiler-Build `
+            -Platform $toolsPlatform `
+            -Configuration $toolsConfiguration `
+            -BuildPath $compilerAndToolsBuildPath
     }
 
     $buildPath = Join-Path $WorkSpacePath "build\$triplet"
@@ -219,15 +223,20 @@ function Invoke-CreateNugetPackage() {
     Invoke-EnsureDir "$OutputPath\lib\native\uwp\release"
 
     Invoke-EnsureDir "$OutputPath\build\native\include\jsi"
-    Copy-Item "$SourcesPath\API\jsi\jsi\*" -Destination "$OutputPath\build\native\include\jsi" -Force -Recurse
+    Copy-Item "$SourcesPath\API\jsi\jsi\*" `
+        -Destination "$OutputPath\build\native\include\jsi" -Force -Recurse
 
     Invoke-EnsureDir "$OutputPath\build\native\include\node-api"
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api.h" -Destination "$OutputPath\build\native\include\node-api" -Force
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api_types.h" -Destination "$OutputPath\build\native\include\node-api" -Force
-    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_runtime_api.h" -Destination "$OutputPath\build\native\include\node-api" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api.h" `
+        -Destination "$OutputPath\build\native\include\node-api" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_native_api_types.h" `
+        -Destination "$OutputPath\build\native\include\node-api" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\node-api\js_runtime_api.h" `
+        -Destination "$OutputPath\build\native\include\node-api" -Force
 
     Invoke-EnsureDir "$OutputPath\build\native\include\hermes"
-    Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" -Destination "$OutputPath\build\native\include\hermes" -Force
+    Copy-Item "$SourcesPath\API\hermes_shared\hermes_api.h" `
+        -Destination "$OutputPath\build\native\include\hermes" -Force
 
     Invoke-EnsureDir "$OutputPath\license"
     Copy-Item "$SourcesPath\LICENSE" `
@@ -284,7 +293,13 @@ function Invoke-Compiler-Build($Platform, $Configuration, $BuildPath) {
 
     $targets = @("hermes","hermesc")
 
-    Invoke-BuildImpl -AppPlatform "win32" -Platform $Platform -Configuration $Configuration -BuildPath $BuildPath -GenArgs $genArgs -Targets $targets
+    Invoke-BuildImpl `
+        -AppPlatform "win32" `
+        -Platform $Platform `
+        -Configuration $Configuration `
+        -BuildPath $BuildPath `
+        -GenArgs $genArgs `
+        -Targets $targets
 }
 
 function Invoke-Dll-Build($Platform, $Configuration, $BuildPath, $CompilerAndToolsBuildPath) {
