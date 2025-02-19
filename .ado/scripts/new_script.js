@@ -3,19 +3,17 @@ const fs = require("fs");
 const path = require("path");
 const { parseArgs } = require("node:util");
 
+const sourcesPath = path.resolve(__dirname, path.join("..", ".."));
+
 const options = {
   help: { type: "boolean", default: false },
-  "sources-path": {
-    type: "string",
-    default: path.resolve(__dirname, path.join("..", "..")),
-  },
   "output-path": {
     type: "string",
-    default: path.resolve(__dirname, path.join("..", "..", "out")),
+    default: path.join(sourcesPath, "out"),
   },
   "app-platform": {
     type: "string",
-    default: "uwp",
+    default: "win32",
     validSet: ["win32", "uwp"],
   },
   platform: {
@@ -63,9 +61,6 @@ function printHelp() {
 
 Options:
   --help                  Show this help message and exit
-  --sources-path          Path to the source directory (default: ${
-    options["sources-path"].default
-  })
   --output-path           Path to the output directory (default: ${
     options["output-path"].default
   })
@@ -131,21 +126,16 @@ for (const [key, value] of Object.entries(args)) {
   }
 }
 
-const scriptState = {
-  vcvarsall_bat: null,
-};
-
 main();
 
 function main() {
   const startTime = new Date();
 
-  args["sources-path"] = path.resolve(args["sources-path"]);
   ensureDir(args["output-path"]);
   args["output-path"] = path.resolve(args["output-path"]);
 
   console.log(`${__filename} is invoked with parameters:`);
-  console.log(`         sources-path: ${args["sources-path"]}`);
+  console.log(`         sources-path: ${sourcesPath}`);
   console.log(`          output-path: ${args["output-path"]}`);
   console.log(`         app-platform: ${args["app-platform"]}`);
   console.log(`             platform: ${args.platform}`);
@@ -163,72 +153,36 @@ function main() {
   console.log(`           fake-build: ${args["fake-build"]}`);
   console.log();
 
+  //TODO: implement.
   //removeUnusedFilesForComponentGovernance();
-
-  scriptState.vcvarsall_bat = findVSPath();
 
   process.chdir(args["output-path"]);
   try {
-    updateHermesVersion();
-    if (args.build) {
-      const platforms = Array.isArray(args.platform)
-        ? args.platform
-        : [args.platform];
-      const configurations = Array.isArray(args.configuration)
-        ? args.configuration
-        : [args.configuration];
-      platforms.forEach((platform) => {
-        configurations.forEach((configuration) => {
-          buildAndCopy(platform, configuration);
-        });
-      });
-    }
-    if (args.pack) {
-      createNugetPackage();
-    }
+    // updateHermesVersion();
+    // if (args.build) {
+    //   const platforms = Array.isArray(args.platform)
+    //     ? args.platform
+    //     : [args.platform];
+    //   const configurations = Array.isArray(args.configuration)
+    //     ? args.configuration
+    //     : [args.configuration];
+    //   platforms.forEach((platform) => {
+    //     configurations.forEach((configuration) => {
+    //       buildAndCopy({ platform, configuration });
+    //     });
+    //   });
+    // }
+    // if (args.pack) {
+    //   createNugetPackage();
+    // }
   } finally {
     process.chdir(__dirname);
   }
 
   const elapsedTime = new Date() - startTime;
-  const totalTime = new Date(elapsedTime).toISOString().substr(11, 8);
+  const totalTime = new Date(elapsedTime).toISOString().substring(11, 19);
   console.log(`Build took ${totalTime} to run`);
   console.log();
-}
-
-function findVSPath() {
-  const vsWhere = path.join(
-    process.env["ProgramFiles(x86)"] || process.env["ProgramFiles"],
-    "Microsoft Visual Studio",
-    "Installer",
-    "vswhere.exe"
-  );
-  if (!fs.existsSync(vsWhere)) {
-    throw new Error("Could not find vswhere.exe");
-  }
-
-  const versionJson = JSON.parse(
-    execSync(`"${vsWhere}" -format json -version 17`).toString()
-  );
-  if (versionJson.length > 1) {
-    console.warn("More than one VS install detected, picking the first one");
-  }
-
-  const installationPath = versionJson[0].installationPath;
-  const vcVarsPath = path.join(
-    installationPath,
-    "VC",
-    "Auxiliary",
-    "Build",
-    "vcvarsall.bat"
-  );
-  if (!fs.existsSync(vcVarsPath)) {
-    throw new Error(
-      `Could not find vcvarsall.bat at expected Visual Studio installation path: ${vcVarsPath}`
-    );
-  }
-
-  return vcVarsPath;
 }
 
 function updateHermesVersion() {
@@ -262,6 +216,463 @@ function updateHermesVersion() {
 
   console.log(`Semantic version set to ${args["semantic-version"]}`);
   console.log(`Hermes version set to ${hermesVersion}`);
+}
+
+function buildAndCopy({ platform, configuration }) {
+  console.log(
+    `Build for Platform: ${platform}, Configuration: ${configuration}`
+  );
+
+//   const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
+//   const toolsBuildPath = path.join(args["output-path"], "build", "tools");
+//   const compilerPath = path.join(toolsBuildPath, "bin", "hermesc.exe");
+
+
+//   const buildPath = path.join(args["output-path"], "build", triplet);
+//   if (!args["fake-build"]) {
+//     buildDll({
+//       platform,
+//       configuration,
+//       buildPath,
+//       toolsBuildPath,
+//     });
+//   }
+
+//   const finalOutputPath = path.join(
+//     args["output-path"],
+//     "lib",
+//     "native",
+//     args["app-platform"],
+//     configuration,
+//     platform
+//   );
+//   ensureDir(finalOutputPath);
+
+}
+
+function copyBuiltFiles({ platform, configuration }) {
+  console.log(
+    `Build for Platform: ${platform}, Configuration: ${configuration}`
+  );
+
+  const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
+  const toolsBuildPath = path.join(args["output-path"], "build", "tools");
+  const compilerPath = path.join(toolsBuildPath, "bin", "hermesc.exe");
+
+  if (args["fake-build"]) {
+    if (!fs.existsSync(compilerPath) && args["app-platform"] === "uwp") {
+      buildHermesCompiler({
+        platform: args["tools-platform"],
+        configuration: args["tools-configuration"],
+        toolsBuildPath,
+      });
+    }
+  }
+
+  const buildPath = path.join(args["output-path"], "build", triplet);
+  if (!args["fake-build"]) {
+    buildDll({
+      platform,
+      configuration,
+      buildPath,
+      toolsBuildPath,
+    });
+  }
+
+  const finalOutputPath = path.join(
+    args["output-path"],
+    "lib",
+    "native",
+    args["app-platform"],
+    configuration,
+    platform
+  );
+  ensureDir(finalOutputPath);
+
+  if (!args["fake-build"]) {
+    fs.copyFileSync(
+      path.join(buildPath, "API", "hermes_shared", "hermes.dll"),
+      path.join(finalOutputPath, "hermes.dll")
+    );
+    fs.copyFileSync(
+      path.join(buildPath, "API", "hermes_shared", "hermes.lib"),
+      path.join(finalOutputPath, "hermes.lib")
+    );
+    fs.copyFileSync(
+      path.join(buildPath, "API", "hermes_shared", "hermes.pdb"),
+      path.join(finalOutputPath, "hermes.pdb")
+    );
+  } else {
+    fs.copyFileSync(
+      path.join(process.env.SystemRoot, "system32", "kernel32.dll"),
+      path.join(finalOutputPath, "hermes.dll")
+    );
+    fs.writeFileSync(path.join(finalOutputPath, "hermes.lib"), "");
+    fs.writeFileSync(path.join(finalOutputPath, "hermes.pdb"), "");
+  }
+
+  const toolsPath = path.join(
+    args["output-path"],
+    "tools",
+    "native",
+    args["tools-configuration"],
+    args["tools-platform"]
+  );
+  ensureDir(toolsPath);
+  if (!args["fake-build"]) {
+    fs.copyFileSync(
+      path.join(compilerAndToolsBuildPath, "bin", "hermes.exe"),
+      path.join(toolsPath, "hermes.exe")
+    );
+  } else {
+    fs.writeFileSync(path.join(toolsPath, "hermes.exe"), "");
+  }
+}
+
+function createNugetPackage() {
+  ensureDir(
+    path.join(args["output-path"], "lib", "native", "win32", "release")
+  );
+  ensureDir(path.join(args["output-path"], "lib", "native", "uwp", "release"));
+
+  ensureDir(
+    path.join(args["output-path"], "build", "native", "include", "jsi")
+  );
+  fs.cpSync(
+    path.join(args["sources-path"], "API", "jsi", "jsi"),
+    path.join(args["output-path"], "build", "native", "include", "jsi"),
+    { recursive: true }
+  );
+
+  ensureDir(
+    path.join(args["output-path"], "build", "native", "include", "node-api")
+  );
+  fs.copyFileSync(
+    path.join(
+      sourcesPath,
+      "API",
+      "hermes_shared",
+      "node-api",
+      "js_native_api.h"
+    ),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "include",
+      "node-api",
+      "js_native_api.h"
+    )
+  );
+  fs.copyFileSync(
+    path.join(
+      sourcesPath,
+      "API",
+      "hermes_shared",
+      "node-api",
+      "js_native_api_types.h"
+    ),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "include",
+      "node-api",
+      "js_native_api_types.h"
+    )
+  );
+  fs.copyFileSync(
+    path.join(
+      sourcesPath,
+      "API",
+      "hermes_shared",
+      "node-api",
+      "js_runtime_api.h"
+    ),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "include",
+      "node-api",
+      "js_runtime_api.h"
+    )
+  );
+
+  ensureDir(
+    path.join(args["output-path"], "build", "native", "include", "hermes")
+  );
+  fs.copyFileSync(
+    path.join(args["sources-path"], "API", "hermes_shared", "hermes_api.h"),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "include",
+      "hermes",
+      "hermes_api.h"
+    )
+  );
+
+  ensureDir(path.join(args["output-path"], "license"));
+  fs.copyFileSync(
+    path.join(args["sources-path"], "LICENSE"),
+    path.join(args["output-path"], "license", "LICENSE")
+  );
+  fs.copyFileSync(
+    path.join(args["sources-path"], ".ado", "Nuget", "NOTICE.txt"),
+    path.join(args["output-path"], "license", "NOTICE.txt")
+  );
+  fs.copyFileSync(
+    path.join(
+      args["sources-path"],
+      ".ado",
+      "Nuget",
+      "Microsoft.JavaScript.Hermes.props"
+    ),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "Microsoft.JavaScript.Hermes.props"
+    )
+  );
+  fs.copyFileSync(
+    path.join(
+      args["sources-path"],
+      ".ado",
+      "Nuget",
+      "Microsoft.JavaScript.Hermes.targets"
+    ),
+    path.join(
+      args["output-path"],
+      "build",
+      "native",
+      "Microsoft.JavaScript.Hermes.targets"
+    )
+  );
+  fs.copyFileSync(
+    path.join(
+      args["sources-path"],
+      ".ado",
+      "Nuget",
+      "Microsoft.JavaScript.Hermes.nuspec"
+    ),
+    path.join(args["output-path"], "Microsoft.JavaScript.Hermes.nuspec")
+  );
+
+  if (!fs.existsSync(path.join(args["output-path"], "lib", "uap"))) {
+    fs.mkdirSync(path.join(args["output-path"], "lib", "uap"));
+    fs.writeFileSync(path.join(args["output-path"], "lib", "uap", "_._"), "");
+  }
+
+  const pkgPath = path.join(args["output-path"], "pkg");
+  ensureDir(pkgPath);
+
+  const packageVersion = args["release-version"];
+  const repoUrl = "https://github.com/microsoft/hermes-windows";
+  const repoBranch = execSync("git rev-parse --abbrev-ref HEAD")
+    .toString()
+    .trim();
+  const repoCommit = execSync("git rev-parse HEAD").toString().trim();
+  const baseProperties =
+    `nugetroot=${args["output-path"]}` +
+    `;version=${packageVersion}` +
+    `;repoUrl=${repoUrl}` +
+    `;repoBranch=${repoBranch}` +
+    `;repoCommit=${repoCommit}`;
+  const packageProperties = `${baseProperties};fat_suffix=;exclude_bin_files=**/*.pdb`;
+  const fatPackageProperties = `${baseProperties};fat_suffix=.Fat;exclude_bin_files=*.txt`;
+
+  const nugetPackBaseCmd = `nuget pack "${path.join(
+    args["output-path"],
+    "Microsoft.JavaScript.Hermes.nuspec"
+  )}" -OutputDirectory "${pkgPath}" -NoDefaultExcludes`;
+  const nugetPackCmd = `${nugetPackBaseCmd} -Properties "${packageProperties}"`;
+  console.log(`Run command: ${nugetPackCmd}`);
+  execSync(nugetPackCmd);
+
+  const fatNugetPackCmd = `${nugetPackBaseCmd} -Properties "${fatPackageProperties}"`;
+  console.log(`Run command: ${fatNugetPackCmd}`);
+  execSync(fatNugetPackCmd);
+}
+
+function buildHermesCompiler(buildParams) {
+  runBuild({
+    ...buildParams,
+    appPlatform: "win32",
+    genArgs: getCommonArgs(buildParams),
+    targets: ["hermes", "hermesc"],
+  });
+}
+
+function buildDll(buildParams) {
+  const { platform, toolsBuildPath } = buildParams;
+
+  const genArgs = getCommonArgs(buildParams);
+
+  genArgs.push("-DHERMES_ENABLE_DEBUGGER=ON");
+  genArgs.push("-DHERMES_ENABLE_INTL=ON");
+
+  if (args["app-platform"] === "uwp") {
+    genArgs.push("-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF");
+  } else {
+    genArgs.push("-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON");
+  }
+
+  if (args["app-platform"] === "uwp") {
+    genArgs.push("-DCMAKE_SYSTEM_NAME=WindowsStore");
+    genArgs.push(`-DCMAKE_SYSTEM_VERSION="${args["windows-sdk-version"]}"`);
+    genArgs.push(`-DIMPORT_HERMESC=${toolsBuildPath}\\ImportHermesc.cmake`);
+  } else if (platform === "arm64" || platform === "arm64ec") {
+    genArgs.push("-DHERMES_MSVC_ARM64=On");
+    genArgs.push(`-DIMPORT_HERMESC=${toolsBuildPath}\\ImportHermesc.cmake`);
+  }
+
+  if (platform === "arm64ec") {
+    process.env.CFLAGS = "-arm64EC";
+    process.env.CXXFLAGS = "-arm64EC";
+  }
+
+  const targets = ["libshared"];
+  if (args["run-tests"]) {
+    targets.push("check-hermes");
+  }
+
+  runBuild({
+    ...buildParams,
+    appPlatform: args["app-platform"],
+    genArgs,
+    targets,
+  });
+}
+
+function getCommonArgs(buildParams) {
+  const genArgs = ["-G Ninja"];
+  const cmakeConfiguration = getCMakeConfiguration(buildParams);
+  genArgs.push(`-DCMAKE_BUILD_TYPE=${cmakeConfiguration}`);
+  genArgs.push("-DHERMESVM_PLATFORM_LOGGING=On");
+
+  if (args["file-version"]) {
+    genArgs.push(`-DHERMES_FILE_VERSION=${args["file-version"]}`);
+  }
+
+  return genArgs;
+}
+
+function getCMakeConfiguration({ configuration }) {
+  switch (configuration) {
+    case "release":
+      return "Release";
+    case "debug":
+    default:
+      return "FastDebug";
+  }
+}
+
+function runBuild(buildParams) {
+  const { buildPath, genArgs, targets } = buildParams;
+
+  if (!args["incremental-build"]) {
+    deleteDir(buildPath);
+  }
+
+  ensureDir(buildPath);
+  process.chdir(buildPath);
+
+  try {
+    const setVCVars = `"${getVCVarsAllBat()}" ${getVCVarsAllBatArgs(
+      buildParams
+    )}`;
+
+    const genCmd =
+      `${setVCVars} && ` +
+      `cmake ${genArgs.join(" ")} ${args["sources-path"]} 2>&1`;
+    console.log(`Run command: ${genCmd}`);
+    execSync(genCmd, { stdio: "inherit" });
+
+    if (args["configure-only"]) {
+      console.log("Exit: configure only");
+      process.exit(0);
+    }
+
+    const ninjaCmd = `${setVCVars} && ninja ${targets.join(" ")} 2>&1`;
+    console.log(`Run command: ${ninjaCmd}`);
+    execSync(ninjaCmd, { stdio: "inherit" });
+  } finally {
+    process.chdir(__dirname);
+  }
+}
+
+let vcVarsAllBat = "";
+
+function getVCVarsAllBat() {
+  if (vcVarsAllBat) {
+    return vcVarsAllBat;
+  }
+
+  const vsWhere = path.join(
+    process.env["ProgramFiles(x86)"] || process.env["ProgramFiles"],
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe"
+  );
+  if (!fs.existsSync(vsWhere)) {
+    throw new Error("Could not find vswhere.exe");
+  }
+
+  const versionJson = JSON.parse(
+    execSync(`"${vsWhere}" -format json -version 17`).toString()
+  );
+  if (versionJson.length > 1) {
+    console.warn("More than one VS install detected, picking the first one");
+  }
+
+  const installationPath = versionJson[0].installationPath;
+  vcVarsAllBat = path.join(
+    installationPath,
+    "VC",
+    "Auxiliary",
+    "Build",
+    "vcvarsall.bat"
+  );
+  if (!fs.existsSync(vcVarsAllBat)) {
+    throw new Error(
+      `Could not find vcvarsall.bat at expected Visual Studio installation path: ${vcVarsAllBat}`
+    );
+  }
+
+  return vcVarsAllBat;
+}
+
+function getVCVarsAllBatArgs({ appPlatform, platform }) {
+  let vcArgs = "";
+  switch (platform) {
+    case "x64":
+      vcArgs += "x64";
+      break;
+    case "x86":
+      vcArgs += "x64_x86";
+      break;
+    case "arm64":
+    case "arm64ec":
+      vcArgs += "x64_arm64";
+      break;
+    default:
+      vcArgs += "x64";
+  }
+
+  if (appPlatform === "uwp") {
+    vcArgs += " uwp";
+  }
+
+  if (args["windows-sdk-version"]) {
+    vcArgs += ` ${args["windows-sdk-version"]}`;
+  }
+
+  vcArgs += " -vcvars_spectre_libs=spectre";
+
+  return vcArgs;
 }
 
 function ensureDir(dirPath) {
