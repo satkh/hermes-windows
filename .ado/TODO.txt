@@ -4,3 +4,6 @@
 - Use JavaScript?
 
 - Implement Release pipeline
+
+- Fix CMake warinings
+- Fix PlatformIntl tests

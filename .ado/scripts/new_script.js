@@ -7,10 +7,11 @@ const sourcesPath = path.resolve(__dirname, path.join("..", ".."));
 
 const options = {
   help: { type: "boolean", default: false },
-  "output-path": {
-    type: "string",
-    default: path.join(sourcesPath, "out"),
-  },
+  clean: { type: "boolean", default: false },
+  configure: { type: "boolean", default: false },
+  build: { type: "boolean", default: true },
+  test: { type: "boolean", default: false },
+  pack: { type: "boolean", default: false },
   "app-platform": {
     type: "string",
     default: "win32",
@@ -28,28 +29,19 @@ const options = {
     default: ["release"],
     validSet: ["debug", "release"],
   },
-  "tools-platform": {
+  "output-path": {
     type: "string",
-    default: "x86",
-    validSet: ["x86", "x64", "arm64"],
-  },
-  "tools-configuration": {
-    type: "string",
-    default: "release",
-    validSet: ["debug", "release"],
+    default: path.join(sourcesPath, "out"),
   },
   "semantic-version": { type: "string", default: "0.0.0" },
   "file-version": { type: "string", default: "0.0.0.0" },
   "windows-sdk-version": { type: "string", default: "" },
-  "incremental-build": { type: "boolean", default: false },
-  "configure-only": { type: "boolean", default: false },
-  build: { type: "boolean", default: true },
-  test: { type: "boolean", default: false },
-  pack: { type: "boolean", default: false },
   "fake-build": { type: "boolean", default: false },
 };
 
 const { values: args } = parseArgs({ options, allowNegative: true });
+const scriptRelativePath = path.relative(process.cwd(), __filename);
+const vcVarsAllBat = getVCVarsAllBat();
 
 if (args.help) {
   printHelp();
@@ -57,12 +49,20 @@ if (args.help) {
 }
 
 function printHelp() {
-  console.log(`Usage: node ${path.relative(process.cwd(), __filename)} [options]
+  console.log(`Usage: node ${scriptRelativePath} [options]
 
 Options:
   --help                  Show this help message and exit
-  --output-path           Path to the output directory (default: ${
-    options["output-path"].default
+  --clean                 Delete previous configuration and built files (default: ${
+    options.clean.default
+  })
+  --configure             Configure CMake before the build (default: ${
+    options.configure.default
+  })
+  --build                 Build binaries (default: ${options.build.default})
+  --test                  Run tests (default: ${options.test.default})
+  --pack                  Create NuGet packages (default: ${
+    options.pack.default
   })
   --app-platform          Application platform (default: ${
     options["app-platform"].default
@@ -73,12 +73,9 @@ Options:
   --configuration         Build configuration(s) (default: ${options.configuration.default.join(
     ", "
   )}) [valid values: ${options.configuration.validSet.join(", ")}]
-  --tools-platform        Platform used for building tools (default: ${
-    options["tools-platform"].default
-  }) [valid values: ${options["tools-platform"].validSet.join(", ")}]
-  --tools-configuration   Configuration used for building tools (default: ${
-    options["tools-configuration"].default
-  }) [valid values: ${options["tools-configuration"].validSet.join(", ")}]
+  --output-path           Path to the output directory (default: ${
+    options["output-path"].default
+  })
   --semantic-version      NuGet package semantic version (default: ${
     options["semantic-version"].default
   })
@@ -88,18 +85,7 @@ Options:
   --windows-sdk-version   Windows SDK version E.g. "10.0.17763.0" (default: ${
     options["windows-sdk-version"].default
   })
-  --incremental-build     Perform an incremental build (default: ${
-    options["incremental-build"].default
-  })
-  --configure-only        Only configure the build (default: ${
-    options["configure-only"].default
-  })
-  --build                 Build binaries (default: ${options.build.default})
-  --test                  Run tests (default: ${options.test.default})
-  --pack                  Create NuGet packages (default: ${
-    options.pack.default
-  })
-  --fake-build            Replace binaries with fake files for faster debugging (default: ${
+  --fake-build            Replace binaries with fake files for script debugging (default: ${
     options["fake-build"].default
   })
 `);
@@ -134,50 +120,53 @@ function main() {
   ensureDir(args["output-path"]);
   args["output-path"] = path.resolve(args["output-path"]);
 
-  console.log(`${__filename} is invoked with parameters:`);
-  console.log(`         sources-path: ${sourcesPath}`);
-  console.log(`          output-path: ${args["output-path"]}`);
-  console.log(`         app-platform: ${args["app-platform"]}`);
-  console.log(`             platform: ${args.platform}`);
-  console.log(`        configuration: ${args.configuration}`);
-  console.log(`       tools-platform: ${args["tools-platform"]}`);
-  console.log(`  tools-configuration: ${args["tools-configuration"]}`);
-  console.log(`     semantic-version: ${args["semantic-version"]}`);
-  console.log(`         file-version: ${args["file-version"]}`);
-  console.log(`  windows-sdk-version: ${args["windows-sdk-version"]}`);
-  console.log(`    incremental-build: ${args["incremental-build"]}`);
-  console.log(`       configure-only: ${args["configure-only"]}`);
+  console.log();
+  console.log(`The ${scriptRelativePath} is invoked with parameters:`);
+  console.log(`                clean: ${args.clean}`);
+  console.log(`            configure: ${args.configure}`);
   console.log(`                build: ${args.build}`);
   console.log(`                 test: ${args.test}`);
   console.log(`                 pack: ${args.pack}`);
+  console.log(`         app-platform: ${args["app-platform"]}`);
+  console.log(`             platform: ${args.platform}`);
+  console.log(`        configuration: ${args.configuration}`);
+  console.log(`          output-path: ${args["output-path"]}`);
+  console.log(`     semantic-version: ${args["semantic-version"]}`);
+  console.log(`         file-version: ${args["file-version"]}`);
+  console.log(`  windows-sdk-version: ${args["windows-sdk-version"]}`);
   console.log(`           fake-build: ${args["fake-build"]}`);
   console.log();
 
   //TODO: implement.
   //removeUnusedFilesForComponentGovernance();
 
-  process.chdir(args["output-path"]);
-  try {
-    // updateHermesVersion();
-    // if (args.build) {
-    //   const platforms = Array.isArray(args.platform)
-    //     ? args.platform
-    //     : [args.platform];
-    //   const configurations = Array.isArray(args.configuration)
-    //     ? args.configuration
-    //     : [args.configuration];
-    //   platforms.forEach((platform) => {
-    //     configurations.forEach((configuration) => {
-    //       buildAndCopy({ platform, configuration });
-    //     });
-    //   });
-    // }
-    // if (args.pack) {
-    //   createNugetPackage();
-    // }
-  } finally {
-    process.chdir(__dirname);
-  }
+  // Create output directories.
+  ensureDir(path.join(args["output-path"], "build"));
+  ensureDir(path.join(args["output-path"], "nuget"));
+  ensureDir(path.join(args["output-path"], "pkg"));
+  // updateHermesVersion();
+  const platforms = Array.isArray(args.platform)
+    ? args.platform
+    : [args.platform];
+  const configurations = Array.isArray(args.configuration)
+    ? args.configuration
+    : [args.configuration];
+  platforms.forEach((platform) => {
+    configurations.forEach((configuration) => {
+      if (args.clean) {
+        cmakeClean({ platform, configuration });
+      }
+      if (args.configure) {
+        cmakeConfigure({ platform, configuration });
+      }
+      if (args.build) {
+        cmakeBuild({ platform, configuration });
+      }
+    });
+  });
+  // if (args.pack) {
+  //   packFiles();
+  // }
 
   const elapsedTime = new Date() - startTime;
   const totalTime = new Date(elapsedTime).toISOString().substring(11, 19);
@@ -185,69 +174,181 @@ function main() {
   console.log();
 }
 
-function updateHermesVersion() {
-  if (!args["semantic-version"].trim()) {
-    return;
-  }
-  if (args["file-version"].trim() === "0.0.0.0") {
-    return;
-  }
+// function updateHermesVersion() {
+//   if (!args["semantic-version"].trim()) {
+//     return;
+//   }
+//   if (args["file-version"].trim() === "0.0.0.0") {
+//     return;
+//   }
 
-  let hermesVersion = args["semantic-version"];
-  if (hermesVersion.startsWith("0.0.0")) {
-    hermesVersion = args["file-version"];
-  }
+//   let hermesVersion = args["semantic-version"];
+//   if (hermesVersion.startsWith("0.0.0")) {
+//     hermesVersion = args["file-version"];
+//   }
 
-  const cmakeListsPath = path.join(args["sources-path"], "CMakeLists.txt");
-  const cmakeContent = fs
-    .readFileSync(cmakeListsPath, "utf8")
-    .replace(/VERSION .*/, `VERSION ${hermesVersion}`);
-  fs.writeFileSync(cmakeListsPath, cmakeContent);
+//   const cmakeListsPath = path.join(args["sources-path"], "CMakeLists.txt");
+//   const cmakeContent = fs
+//     .readFileSync(cmakeListsPath, "utf8")
+//     .replace(/VERSION .*/, `VERSION ${hermesVersion}`);
+//   fs.writeFileSync(cmakeListsPath, cmakeContent);
 
-  const packageJsonPath = path.join(
-    args["sources-path"],
-    "npm",
-    "package.json"
-  );
-  const packageContent = fs
-    .readFileSync(packageJsonPath, "utf8")
-    .replace(/"version": ".*",/, `"version": "${args["semantic-version"]}",`);
-  fs.writeFileSync(packageJsonPath, packageContent);
+//   const packageJsonPath = path.join(
+//     args["sources-path"],
+//     "npm",
+//     "package.json"
+//   );
+//   const packageContent = fs
+//     .readFileSync(packageJsonPath, "utf8")
+//     .replace(/"version": ".*",/, `"version": "${args["semantic-version"]}",`);
+//   fs.writeFileSync(packageJsonPath, packageContent);
 
-  console.log(`Semantic version set to ${args["semantic-version"]}`);
-  console.log(`Hermes version set to ${hermesVersion}`);
+//   console.log(`Semantic version set to ${args["semantic-version"]}`);
+//   console.log(`Hermes version set to ${hermesVersion}`);
+// }
+
+function getBuildPath({ platform, configuration }) {
+  const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
+  return path.join(args["output-path"], "build", triplet);
 }
 
-function buildAndCopy({ platform, configuration }) {
+function cmakeClean({ platform, configuration }) {
+  console.log(
+    `Clean for Platform: ${platform}, Configuration: ${configuration}`
+  );
+
+  const buildPath = getBuildPath({ platform, configuration });
+  deleteDir(buildPath);
+}
+
+function cmakeConfigure({ platform, configuration }) {
+  console.log(
+    `Configure for Platform: ${platform}, Configuration: ${configuration}`
+  );
+
+  const genArgs = ["-G Ninja"];
+
+  const cmakeConfiguration =
+    configuration === "release" ? "Release" : "FastDebug";
+  genArgs.push(`-DCMAKE_BUILD_TYPE=${cmakeConfiguration}`);
+  genArgs.push("-DHERMESVM_PLATFORM_LOGGING=ON");
+
+  if (args["file-version"] && args["file-version"] !== "0.0.0.0") {
+    genArgs.push(`-DHERMES_FILE_VERSION=${args["file-version"]}`);
+  }
+
+  genArgs.push("-DHERMES_ENABLE_DEBUGGER=ON");
+  genArgs.push("-DHERMES_ENABLE_INTL=ON");
+
+  const isUwp = args["app-platform"] === "uwp";
+  genArgs.push(
+    `-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=${isUwp ? "OFF" : "ON"}`
+  );
+
+  if (isUwp) {
+    genArgs.push("-DCMAKE_SYSTEM_NAME=WindowsStore");
+    genArgs.push(`-DCMAKE_SYSTEM_VERSION="${args["windows-sdk-version"]}"`);
+  } else if (platform === "arm64" || platform === "arm64ec") {
+    genArgs.push("-DHERMES_MSVC_ARM64=ON");
+  }
+
+  const buildPath = getBuildPath({ platform, configuration });
+  ensureDir(buildPath);
+  const originalCwd = process.cwd();
+  process.chdir(buildPath);
+  try {
+    const genCmd =
+      `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(platform)} && ` +
+      `cmake ${genArgs.join(" ")} \"${sourcesPath}\" 2>&1`;
+    console.log(`Run command: ${genCmd}`);
+    execSync(genCmd, { stdio: "inherit" });
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
+
+function cmakeBuild({ platform, configuration }) {
   console.log(
     `Build for Platform: ${platform}, Configuration: ${configuration}`
   );
 
-//   const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
-//   const toolsBuildPath = path.join(args["output-path"], "build", "tools");
-//   const compilerPath = path.join(toolsBuildPath, "bin", "hermesc.exe");
+  const buildPath = getBuildPath({ platform, configuration });
+  if (!fs.existsSync(buildPath)) {
+    cmakeConfigure({ platform, configuration });
+  }
+  const originalCwd = process.cwd();
+  process.chdir(buildPath);
+  try {
+    const buildCmd =
+      `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(platform)} && ` +
+      `cmake --build . 2>&1`;
+    console.log(`Run command: ${buildCmd}`);
+    execSync(buildCmd, { stdio: "inherit" });
+  } finally {
+    process.chdir(originalCwd);
+  }
+}
 
+// const savedCFlags = process.env.CFLAGS;
+// const savedCXXFlags = process.env.CXXFLAGS;
+// if (platform === "arm64ec") {
+//   process.env.CFLAGS = "-arm64EC";
+//   process.env.CXXFLAGS = "-arm64EC";
+// }
 
-//   const buildPath = path.join(args["output-path"], "build", triplet);
-//   if (!args["fake-build"]) {
-//     buildDll({
-//       platform,
-//       configuration,
-//       buildPath,
-//       toolsBuildPath,
-//     });
-//   }
+// const targets = ["libshared", "hermes", "hermesc"],
+// if (args["run-tests"]) {
+//   targets.push("check-hermes");
+// }
 
-//   const finalOutputPath = path.join(
-//     args["output-path"],
-//     "lib",
-//     "native",
-//     args["app-platform"],
-//     configuration,
-//     platform
-//   );
-//   ensureDir(finalOutputPath);
+// deleteDir(buildPath);
+// ensureDir(buildPath);
+// const originalCwd = process.cwd();
+// process.chdir(buildPath);
+// try {
+//   const setVCVars = `"${getVCVarsAllBat()}" ${getVCVarsAllBatArgs(
+//     buildParams
+//   )}`;
 
+//   const genCmd =
+//     `${setVCVars} && ` +
+//     `cmake ${genArgs.join(" ")} ${args["sources-path"]} 2>&1`;
+//   console.log(`Run command: ${genCmd}`);
+//   execSync(genCmd, { stdio: "inherit" });
+// } finally {
+//   process.chdir(originalCwd);
+//   process.env.CFLAGS = savedCFlags;
+//   process.env.CXXFLAGS = savedCXXFlags;
+// }
+
+function buildBinaries({ platform, configuration }) {
+  console.log(
+    `Build for Platform: ${platform}, Configuration: ${configuration}`
+  );
+
+  //   const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
+  //   const toolsBuildPath = path.join(args["output-path"], "build", "tools");
+  //   const compilerPath = path.join(toolsBuildPath, "bin", "hermesc.exe");
+
+  //   const buildPath = path.join(args["output-path"], "build", triplet);
+  //   if (!args["fake-build"]) {
+  //     buildDll({
+  //       platform,
+  //       configuration,
+  //       buildPath,
+  //       toolsBuildPath,
+  //     });
+  //   }
+
+  //   const finalOutputPath = path.join(
+  //     args["output-path"],
+  //     "lib",
+  //     "native",
+  //     args["app-platform"],
+  //     configuration,
+  //     platform
+  //   );
+  //   ensureDir(finalOutputPath);
 }
 
 function copyBuiltFiles({ platform, configuration }) {
@@ -534,7 +635,7 @@ function buildDll(buildParams) {
     process.env.CXXFLAGS = "-arm64EC";
   }
 
-  const targets = ["libshared"];
+  const targets = ["libshared"]; //"hermes", "hermesc"
   if (args["run-tests"]) {
     targets.push("check-hermes");
   }
@@ -604,13 +705,7 @@ function runBuild(buildParams) {
   }
 }
 
-let vcVarsAllBat = "";
-
 function getVCVarsAllBat() {
-  if (vcVarsAllBat) {
-    return vcVarsAllBat;
-  }
-
   const vsWhere = path.join(
     process.env["ProgramFiles(x86)"] || process.env["ProgramFiles"],
     "Microsoft Visual Studio",
@@ -629,7 +724,7 @@ function getVCVarsAllBat() {
   }
 
   const installationPath = versionJson[0].installationPath;
-  vcVarsAllBat = path.join(
+  const vcVarsAllBat = path.join(
     installationPath,
     "VC",
     "Auxiliary",
@@ -645,7 +740,7 @@ function getVCVarsAllBat() {
   return vcVarsAllBat;
 }
 
-function getVCVarsAllBatArgs({ appPlatform, platform }) {
+function getVCVarsAllBatArgs(platform) {
   let vcArgs = "";
   switch (platform) {
     case "x64":
@@ -662,7 +757,7 @@ function getVCVarsAllBatArgs({ appPlatform, platform }) {
       vcArgs += "x64";
   }
 
-  if (appPlatform === "uwp") {
+  if (args["app-platform"] === "uwp") {
     vcArgs += " uwp";
   }
 
@@ -681,11 +776,11 @@ function ensureDir(dirPath) {
   }
 }
 
-// function deleteDir(dirPath) {
-//   if (fs.existsSync(dirPath)) {
-//     fs.rmSync(dirPath, { recursive: true, force: true });
-//   }
-// }
+function deleteDir(dirPath) {
+  if (fs.existsSync(dirPath)) {
+    fs.rmSync(dirPath, { recursive: true, force: true });
+  }
+}
 
 /*
 // Convert all string arg values to lower case.
