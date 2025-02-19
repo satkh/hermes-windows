@@ -59,7 +59,7 @@ if (args.help) {
 }
 
 function printHelp() {
-  console.log(`Usage: node cibuild.js [options]
+  console.log(`Usage: node ${path.relative(process.cwd(), __filename)} [options]
 
 Options:
   --help                  Show this help message and exit
@@ -119,73 +119,163 @@ for (const [key, value] of Object.entries(args)) {
 
 // Validate args values against the validSet.
 for (const [key, value] of Object.entries(args)) {
-  if (options[key]?.validSet && !options[key].validSet.includes(value)) {
-    console.error(`Invalid value for ${key}: ${value}`);
-    console.error(`Valid values are: ${options[key].validSet.join(", ")}`);
-    process.exit(1);
+  if (options[key]?.validSet) {
+    const values = options[key].multiple ? value : [value];
+    for (const item of values) {
+      if (!options[key].validSet.includes(item)) {
+        console.error(`Invalid value for ${key}: ${item}`);
+        console.error(`Valid values are: ${options[key].validSet.join(", ")}`);
+        process.exit(1);
+      }
+    }
   }
 }
+
+const scriptState = {
+  vcvarsall_bat: null,
+};
 
 main();
 
 function main() {
   const startTime = new Date();
 
-  //   args['sources-path'] = path.resolve(args['sources-path']);
-  //   ensureDir(args['workspace-path']);
-  //   args['workspace-path'] = path.resolve(args['workspace-path']);
-  //   ensureDir(args['output-path']);
-  //   args['output-path'] = path.resolve(args['output-path']);
+  args["sources-path"] = path.resolve(args["sources-path"]);
+  ensureDir(args["output-path"]);
+  args["output-path"] = path.resolve(args["output-path"]);
 
   console.log(`${__filename} is invoked with parameters:`);
-  console.log(`       sources-path: ${args["sources-path"]}`);
-  console.log(`        output-path: ${args["output-path"]}`);
-  console.log(`       app-platform: ${args["app-platform"]}`);
-  console.log(`           platform: ${args.platform}`);
-  console.log(`      configuration: ${args.configuration}`);
-  console.log(`     tools-platform: ${args["tools-platform"]}`);
-  console.log(`tools-configuration: ${args["tools-configuration"]}`);
-  console.log(`   semantic-version: ${args["semantic-version"]}`);
-  console.log(`       file-version: ${args["file-version"]}`);
-  console.log(`windows-sdk-version: ${args["windows-sdk-version"]}`);
-  console.log(`  incremental-build: ${args["incremental-build"]}`);
-  console.log(`     configure-only: ${args["configure-only"]}`);
-  console.log(`              build: ${args.build}`);
-  console.log(`               test: ${args.test}`);
-  console.log(`               pack: ${args.pack}`);
-  console.log(`         fake-build: ${args["fake-build"]}`);
+  console.log(`         sources-path: ${args["sources-path"]}`);
+  console.log(`          output-path: ${args["output-path"]}`);
+  console.log(`         app-platform: ${args["app-platform"]}`);
+  console.log(`             platform: ${args.platform}`);
+  console.log(`        configuration: ${args.configuration}`);
+  console.log(`       tools-platform: ${args["tools-platform"]}`);
+  console.log(`  tools-configuration: ${args["tools-configuration"]}`);
+  console.log(`     semantic-version: ${args["semantic-version"]}`);
+  console.log(`         file-version: ${args["file-version"]}`);
+  console.log(`  windows-sdk-version: ${args["windows-sdk-version"]}`);
+  console.log(`    incremental-build: ${args["incremental-build"]}`);
+  console.log(`       configure-only: ${args["configure-only"]}`);
+  console.log(`                build: ${args.build}`);
+  console.log(`                 test: ${args.test}`);
+  console.log(`                 pack: ${args.pack}`);
+  console.log(`           fake-build: ${args["fake-build"]}`);
   console.log();
 
-  //   deleteDir(path.join(args['workspace-path'], 'unsupported', 'juno'));
+  //removeUnusedFilesForComponentGovernance();
 
-  //   const vcvarsallBat = findVSPath();
+  scriptState.vcvarsall_bat = findVSPath();
 
-  //   process.chdir(args['workspace-path']);
-  //   try {
-  //     updateHermesVersion();
-
-  //     if (!args['no-build']) {
-  //       const platforms = Array.isArray(args.platform) ? args.platform : [args.platform];
-  //       const configurations = Array.isArray(args.configuration) ? args.configuration : [args.configuration];
-  //       platforms.forEach(platform => {
-  //         configurations.forEach(configuration => {
-  //           buildAndCopy(platform, configuration);
-  //         });
-  //       });
-  //     }
-
-  //     if (!args['no-pack']) {
-  //       createNugetPackage();
-  //     }
-  //   } finally {
-  //     process.chdir(__dirname);
-  //   }
+  process.chdir(args["output-path"]);
+  try {
+    updateHermesVersion();
+    if (args.build) {
+      const platforms = Array.isArray(args.platform)
+        ? args.platform
+        : [args.platform];
+      const configurations = Array.isArray(args.configuration)
+        ? args.configuration
+        : [args.configuration];
+      platforms.forEach((platform) => {
+        configurations.forEach((configuration) => {
+          buildAndCopy(platform, configuration);
+        });
+      });
+    }
+    if (args.pack) {
+      createNugetPackage();
+    }
+  } finally {
+    process.chdir(__dirname);
+  }
 
   const elapsedTime = new Date() - startTime;
   const totalTime = new Date(elapsedTime).toISOString().substr(11, 8);
   console.log(`Build took ${totalTime} to run`);
   console.log();
 }
+
+function findVSPath() {
+  const vsWhere = path.join(
+    process.env["ProgramFiles(x86)"] || process.env["ProgramFiles"],
+    "Microsoft Visual Studio",
+    "Installer",
+    "vswhere.exe"
+  );
+  if (!fs.existsSync(vsWhere)) {
+    throw new Error("Could not find vswhere.exe");
+  }
+
+  const versionJson = JSON.parse(
+    execSync(`"${vsWhere}" -format json -version 17`).toString()
+  );
+  if (versionJson.length > 1) {
+    console.warn("More than one VS install detected, picking the first one");
+  }
+
+  const installationPath = versionJson[0].installationPath;
+  const vcVarsPath = path.join(
+    installationPath,
+    "VC",
+    "Auxiliary",
+    "Build",
+    "vcvarsall.bat"
+  );
+  if (!fs.existsSync(vcVarsPath)) {
+    throw new Error(
+      `Could not find vcvarsall.bat at expected Visual Studio installation path: ${vcVarsPath}`
+    );
+  }
+
+  return vcVarsPath;
+}
+
+function updateHermesVersion() {
+  if (!args["semantic-version"].trim()) {
+    return;
+  }
+  if (args["file-version"].trim() === "0.0.0.0") {
+    return;
+  }
+
+  let hermesVersion = args["semantic-version"];
+  if (hermesVersion.startsWith("0.0.0")) {
+    hermesVersion = args["file-version"];
+  }
+
+  const cmakeListsPath = path.join(args["sources-path"], "CMakeLists.txt");
+  const cmakeContent = fs
+    .readFileSync(cmakeListsPath, "utf8")
+    .replace(/VERSION .*/, `VERSION ${hermesVersion}`);
+  fs.writeFileSync(cmakeListsPath, cmakeContent);
+
+  const packageJsonPath = path.join(
+    args["sources-path"],
+    "npm",
+    "package.json"
+  );
+  const packageContent = fs
+    .readFileSync(packageJsonPath, "utf8")
+    .replace(/"version": ".*",/, `"version": "${args["semantic-version"]}",`);
+  fs.writeFileSync(packageJsonPath, packageContent);
+
+  console.log(`Semantic version set to ${args["semantic-version"]}`);
+  console.log(`Hermes version set to ${hermesVersion}`);
+}
+
+function ensureDir(dirPath) {
+  if (!fs.existsSync(dirPath)) {
+    fs.mkdirSync(dirPath, { recursive: true });
+  }
+}
+
+// function deleteDir(dirPath) {
+//   if (fs.existsSync(dirPath)) {
+//     fs.rmSync(dirPath, { recursive: true, force: true });
+//   }
+// }
+
 /*
 // Convert all string arg values to lower case.
 for (const [key, value] of Object.entries(args)) {
@@ -269,18 +359,6 @@ function main() {
   //   console.log("");
 }
 
-
-function ensureDir(dirPath) {
-  if (!fs.existsSync(dirPath)) {
-    fs.mkdirSync(dirPath, { recursive: true });
-  }
-}
-
-function deleteDir(dirPath) {
-  if (fs.existsSync(dirPath)) {
-    fs.rmSync(dirPath, { recursive: true, force: true });
-  }
-}
 
 function findVSPath() {
   let vsWhere = path.join(
