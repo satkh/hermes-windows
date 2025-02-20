@@ -142,7 +142,7 @@ function main() {
 
   // Create output directories.
   ensureDir(path.join(args["output-path"], "build"));
-  ensureDir(path.join(args["output-path"], "nuget"));
+  ensureDir(path.join(args["output-path"], "staging"));
   ensureDir(path.join(args["output-path"], "pkg"));
   // updateHermesVersion();
   const platforms = Array.isArray(args.platform)
@@ -153,14 +153,29 @@ function main() {
     : [args.configuration];
   platforms.forEach((platform) => {
     configurations.forEach((configuration) => {
+      const buildParams = {
+        platform,
+        configuration,
+        buildPath: getBuildPath({ platform, configuration }),
+      };
+      console.log(
+        "Build for " +
+          `Platform: ${buildParams.platform}, ` +
+          `Configuration: ${buildParams.configuration}, ` +
+          `Build path: ${buildParams.buildPath}`
+      );
+
       if (args.clean) {
-        cmakeClean({ platform, configuration });
+        cmakeClean(buildParams);
       }
       if (args.configure) {
-        cmakeConfigure({ platform, configuration });
+        cmakeConfigure(buildParams);
       }
       if (args.build) {
-        cmakeBuild({ platform, configuration });
+        cmakeBuild(buildParams);
+      }
+      if (args.test) {
+        cmakeTest(buildParams);
       }
     });
   });
@@ -212,20 +227,11 @@ function getBuildPath({ platform, configuration }) {
   return path.join(args["output-path"], "build", triplet);
 }
 
-function cmakeClean({ platform, configuration }) {
-  console.log(
-    `Clean for Platform: ${platform}, Configuration: ${configuration}`
-  );
-
-  const buildPath = getBuildPath({ platform, configuration });
-  deleteDir(buildPath);
+function cmakeClean(buildParams) {
+  deleteDir(buildParams.buildPath);
 }
 
 function cmakeConfigure({ platform, configuration }) {
-  console.log(
-    `Configure for Platform: ${platform}, Configuration: ${configuration}`
-  );
-
   const genArgs = ["-G Ninja"];
 
   const cmakeConfiguration =
@@ -252,38 +258,42 @@ function cmakeConfigure({ platform, configuration }) {
     genArgs.push("-DHERMES_MSVC_ARM64=ON");
   }
 
+  runVSCommand(`cmake ${genArgs.join(" ")} \"${sourcesPath}\"`, buildParams);
+}
+
+function cmakeBuild(buildParams) {
+  if (!fs.existsSync(buildParams.buildPath)) {
+    cmakeConfigure(buildParams);
+  }
+
+  runVSCommand("cmake --build .", buildParams);
+
+  //copyToStaging({ platform, configuration });
+}
+
+function cmakeTest(buildParams) {
+  if (!fs.existsSync(buildParams.buildPath)) {
+    cmakeBuild(buildParams);
+  }
+
+  runVSCommand("ctest --output-on-failure", buildParams);
+}
+
+function copyToStaging({ platform, configuration }) {
   const buildPath = getBuildPath({ platform, configuration });
+}
+
+function runVSCommand(command, buildParams) {
+  const { buildPath } = buildParams;
   ensureDir(buildPath);
   const originalCwd = process.cwd();
   process.chdir(buildPath);
   try {
-    const genCmd =
-      `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(platform)} && ` +
-      `cmake ${genArgs.join(" ")} \"${sourcesPath}\" 2>&1`;
-    console.log(`Run command: ${genCmd}`);
-    execSync(genCmd, { stdio: "inherit" });
-  } finally {
-    process.chdir(originalCwd);
-  }
-}
-
-function cmakeBuild({ platform, configuration }) {
-  console.log(
-    `Build for Platform: ${platform}, Configuration: ${configuration}`
-  );
-
-  const buildPath = getBuildPath({ platform, configuration });
-  if (!fs.existsSync(buildPath)) {
-    cmakeConfigure({ platform, configuration });
-  }
-  const originalCwd = process.cwd();
-  process.chdir(buildPath);
-  try {
-    const buildCmd =
-      `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(platform)} && ` +
-      `cmake --build . 2>&1`;
-    console.log(`Run command: ${buildCmd}`);
-    execSync(buildCmd, { stdio: "inherit" });
+    const vsCommand =
+      `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(buildParams)}` +
+      ` && ${command} 2>&1`;
+    console.log(`Run command: ${vsCommand}`);
+    execSync(vsCommand, { stdio: "inherit" });
   } finally {
     process.chdir(originalCwd);
   }
@@ -740,7 +750,7 @@ function getVCVarsAllBat() {
   return vcVarsAllBat;
 }
 
-function getVCVarsAllBatArgs(platform) {
+function getVCVarsAllBatArgs({ platform }) {
   let vcArgs = "";
   switch (platform) {
     case "x64":
