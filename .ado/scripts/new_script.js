@@ -35,7 +35,7 @@ const options = {
   },
   "semantic-version": { type: "string", default: "0.0.0" },
   "file-version": { type: "string", default: "0.0.0.0" },
-  "windows-sdk-version": { type: "string", default: "" },
+  "windows-sdk-version": { type: "string", default: "10.0.19041.0" },
   "fake-build": { type: "boolean", default: false },
 };
 
@@ -82,7 +82,7 @@ Options:
   --file-version          Version set in binary files (default: ${
     options["file-version"].default
   })
-  --windows-sdk-version   Windows SDK version E.g. "10.0.17763.0" (default: ${
+  --windows-sdk-version   Windows SDK version E.g. "10.0.19041.0" (default: ${
     options["windows-sdk-version"].default
   })
   --fake-build            Replace binaries with fake files for script debugging (default: ${
@@ -140,11 +140,15 @@ function main() {
   //TODO: implement.
   //removeUnusedFilesForComponentGovernance();
 
-  // Create output directories.
-  ensureDir(path.join(args["output-path"], "build"));
-  ensureDir(path.join(args["output-path"], "staging"));
-  ensureDir(path.join(args["output-path"], "pkg"));
   // updateHermesVersion();
+
+  const runParams = {
+    pkgPath: path.join(args["output-path"], "pkg"),
+    pkgStagingPath: path.join(args["output-path"], "pkg-staging"),
+    toolsPath: path.join(args["output-path"], "tools"),
+    isUwp: args["app-platform"] === "uwp",
+  };
+
   const platforms = Array.isArray(args.platform)
     ? args.platform
     : [args.platform];
@@ -154,17 +158,25 @@ function main() {
   platforms.forEach((platform) => {
     configurations.forEach((configuration) => {
       const buildParams = {
+        ...runParams,
         platform,
         configuration,
         buildPath: getBuildPath({ platform, configuration }),
+        targets: runParams.isUwp ? "libshared" : "",
+        onBuildCompleted: copyBuiltFilesToPkgStaging,
       };
       console.log(
         "Build for " +
+          `IsUWP: ${buildParams.isUwp}, ` +
           `Platform: ${buildParams.platform}, ` +
           `Configuration: ${buildParams.configuration}, ` +
           `Build path: ${buildParams.buildPath}`
       );
 
+      if (args["fake-build"]) {
+        copyFakeFilesToStaging(buildParams);
+        return;
+      }
       if (args.clean) {
         cmakeClean(buildParams);
       }
@@ -229,9 +241,16 @@ function getBuildPath({ platform, configuration }) {
 
 function cmakeClean(buildParams) {
   deleteDir(buildParams.buildPath);
+  deleteDir(buildParams.pkgPath);
+  deleteDir(buildParams.pkgStagingPath);
+  deleteDir(buildParams.toolsPath);
 }
 
-function cmakeConfigure({ platform, configuration }) {
+function cmakeConfigure(buildParams) {
+  const { isUwp, platform, configuration, toolsPath } = buildParams;
+
+  cmakeBuildHermesCompiler(buildParams);
+
   const genArgs = ["-G Ninja"];
 
   const cmakeConfiguration =
@@ -246,7 +265,6 @@ function cmakeConfigure({ platform, configuration }) {
   genArgs.push("-DHERMES_ENABLE_DEBUGGER=ON");
   genArgs.push("-DHERMES_ENABLE_INTL=ON");
 
-  const isUwp = args["app-platform"] === "uwp";
   genArgs.push(
     `-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=${isUwp ? "OFF" : "ON"}`
   );
@@ -254,37 +272,78 @@ function cmakeConfigure({ platform, configuration }) {
   if (isUwp) {
     genArgs.push("-DCMAKE_SYSTEM_NAME=WindowsStore");
     genArgs.push(`-DCMAKE_SYSTEM_VERSION="${args["windows-sdk-version"]}"`);
+    genArgs.push(
+      `-DIMPORT_HERMESC=\"${path.join(toolsPath, "ImportHermesc.cmake")}\"`
+    );
   } else if (platform === "arm64" || platform === "arm64ec") {
     genArgs.push("-DHERMES_MSVC_ARM64=ON");
+    genArgs.push(
+      `-DIMPORT_HERMESC=\"${path.join(toolsPath, "ImportHermesc.cmake")}\"`
+    );
   }
 
-  runVSCommand(`cmake ${genArgs.join(" ")} \"${sourcesPath}\"`, buildParams);
+  runCMakeCommand(`cmake ${genArgs.join(" ")} \"${sourcesPath}\"`, buildParams);
 }
 
 function cmakeBuild(buildParams) {
-  if (!fs.existsSync(buildParams.buildPath)) {
+  const { buildPath, targets, onBuildCompleted } = buildParams;
+  if (!fs.existsSync(buildPath)) {
     cmakeConfigure(buildParams);
   }
 
-  runVSCommand("cmake --build .", buildParams);
+  cmakeBuildHermesCompiler(buildParams);
 
-  //copyToStaging({ platform, configuration });
+  const target = targets ? `--target ${targets}` : "";
+  runCMakeCommand(`cmake --build . ${target}`, buildParams);
+
+  if (onBuildCompleted) {
+    onBuildCompleted(buildParams);
+  }
 }
 
 function cmakeTest(buildParams) {
+  if (buildParams.isUwp) {
+    console.log("Skip testing for UWP");
+    return;
+  }
+
   if (!fs.existsSync(buildParams.buildPath)) {
     cmakeBuild(buildParams);
   }
 
-  runVSCommand("ctest --output-on-failure", buildParams);
+  runCMakeCommand("ctest --output-on-failure", buildParams);
 }
 
-function copyToStaging({ platform, configuration }) {
-  const buildPath = getBuildPath({ platform, configuration });
+function cmakeBuildHermesCompiler(buildParams) {
+  const { toolsPath, isUwp } = buildParams;
+  if (!isUwp) {
+    return;
+  }
+
+  const hermesCompilerPath = path.join(toolsPath, "bin", "hermesc.exe");
+  if (!fs.existsSync(hermesCompilerPath)) {
+    cmakeBuild({
+      ...buildParams,
+      isUwp: false,
+      platform: "x64",
+      configuration: "release",
+      buildPath: toolsPath,
+      targets: "hermesc",
+      onBuildCompleted: undefined,
+    });
+  }
 }
 
-function runVSCommand(command, buildParams) {
-  const { buildPath } = buildParams;
+function runCMakeCommand(command, buildParams) {
+  const { platform, buildPath } = buildParams;
+
+  const savedCFlags = process.env.CFLAGS;
+  const savedCXXFlags = process.env.CXXFLAGS;
+  if (platform === "arm64ec") {
+    process.env.CFLAGS = "-arm64EC";
+    process.env.CXXFLAGS = "-arm64EC";
+  }
+
   ensureDir(buildPath);
   const originalCwd = process.cwd();
   process.chdir(buildPath);
@@ -296,69 +355,77 @@ function runVSCommand(command, buildParams) {
     execSync(vsCommand, { stdio: "inherit" });
   } finally {
     process.chdir(originalCwd);
+    process.env.CFLAGS = savedCFlags;
+    process.env.CXXFLAGS = savedCXXFlags;
   }
 }
 
-// const savedCFlags = process.env.CFLAGS;
-// const savedCXXFlags = process.env.CXXFLAGS;
-// if (platform === "arm64ec") {
-//   process.env.CFLAGS = "-arm64EC";
-//   process.env.CXXFLAGS = "-arm64EC";
-// }
+function copyBuiltFilesToPkgStaging(buildParams) {
+  const { buildPath } = buildParams;
+  const { dllStagingPath, toolsStagingPath } = ensureStagingPaths(buildParams);
 
-// const targets = ["libshared", "hermes", "hermesc"],
-// if (args["run-tests"]) {
-//   targets.push("check-hermes");
-// }
+  const dllSourcePath = path.join(buildPath, "API", "hermes_shared");
+  copyFile("hermes.dll", dllSourcePath, dllStagingPath);
+  copyFile("hermes.lib", dllSourcePath, dllStagingPath);
+  copyFile("hermes.pdb", dllSourcePath, dllStagingPath);
 
-// deleteDir(buildPath);
-// ensureDir(buildPath);
-// const originalCwd = process.cwd();
-// process.chdir(buildPath);
-// try {
-//   const setVCVars = `"${getVCVarsAllBat()}" ${getVCVarsAllBatArgs(
-//     buildParams
-//   )}`;
+  if (!buildParams.isUwp) {
+    const toolsSourcePath = path.join(buildPath, "bin");
+    copyFile("hermes.exe", toolsSourcePath, toolsStagingPath);
+    copyFile("hermesc.exe", toolsSourcePath, toolsStagingPath);
+  }
+}
 
-//   const genCmd =
-//     `${setVCVars} && ` +
-//     `cmake ${genArgs.join(" ")} ${args["sources-path"]} 2>&1`;
-//   console.log(`Run command: ${genCmd}`);
-//   execSync(genCmd, { stdio: "inherit" });
-// } finally {
-//   process.chdir(originalCwd);
-//   process.env.CFLAGS = savedCFlags;
-//   process.env.CXXFLAGS = savedCXXFlags;
-// }
+function copyFakeFilesToStaging(buildParams) {
+  const { dllStagingPath, toolsStagingPath } = ensureStagingPaths(buildParams);
 
-function buildBinaries({ platform, configuration }) {
-  console.log(
-    `Build for Platform: ${platform}, Configuration: ${configuration}`
+  createFakeBinFile(dllStagingPath, "hermes.dll");
+  createFakeBinFile(dllStagingPath, "hermes.lib");
+  createFakeBinFile(dllStagingPath, "hermes.pdb");
+
+  if (!buildParams.isUwp) {
+    createFakeBinFile(toolsStagingPath, "hermes.exe");
+    createFakeBinFile(toolsStagingPath, "hermesc.exe");
+  }
+}
+
+function copyFile(fileName, sourcePath, targetPath) {
+  fs.copyFileSync(
+    path.join(sourcePath, fileName),
+    path.join(targetPath, fileName)
   );
+}
 
-  //   const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
-  //   const toolsBuildPath = path.join(args["output-path"], "build", "tools");
-  //   const compilerPath = path.join(toolsBuildPath, "bin", "hermesc.exe");
+function createFakeBinFile(targetPath, fileName) {
+  fs.copyFileSync(
+    path.join(process.env.SystemRoot, "system32", "kernel32.dll"),
+    path.join(targetPath, fileName)
+  );
+}
 
-  //   const buildPath = path.join(args["output-path"], "build", triplet);
-  //   if (!args["fake-build"]) {
-  //     buildDll({
-  //       platform,
-  //       configuration,
-  //       buildPath,
-  //       toolsBuildPath,
-  //     });
-  //   }
+function ensureStagingPaths(buildParams) {
+  ensureDir(buildParams.pkgStagingPath);
 
-  //   const finalOutputPath = path.join(
-  //     args["output-path"],
-  //     "lib",
-  //     "native",
-  //     args["app-platform"],
-  //     configuration,
-  //     platform
-  //   );
-  //   ensureDir(finalOutputPath);
+  const dllStagingPath = path.join(
+    buildParams.pkgStagingPath,
+    "lib",
+    "native",
+    args["app-platform"],
+    configuration,
+    platform
+  );
+  ensureDir(dllStagingPath);
+
+  const toolsStagingPath = path.join(
+    buildParams.pkgStagingPath,
+    "tools",
+    "native",
+    configuration,
+    platform
+  );
+  ensureDir(toolsStagingPath);
+
+  return { dllStagingPath, toolsStagingPath };
 }
 
 function copyBuiltFiles({ platform, configuration }) {
@@ -617,70 +684,6 @@ function buildHermesCompiler(buildParams) {
   });
 }
 
-function buildDll(buildParams) {
-  const { platform, toolsBuildPath } = buildParams;
-
-  const genArgs = getCommonArgs(buildParams);
-
-  genArgs.push("-DHERMES_ENABLE_DEBUGGER=ON");
-  genArgs.push("-DHERMES_ENABLE_INTL=ON");
-
-  if (args["app-platform"] === "uwp") {
-    genArgs.push("-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=OFF");
-  } else {
-    genArgs.push("-DHERMES_MSVC_USE_PLATFORM_UNICODE_WINGLOB=ON");
-  }
-
-  if (args["app-platform"] === "uwp") {
-    genArgs.push("-DCMAKE_SYSTEM_NAME=WindowsStore");
-    genArgs.push(`-DCMAKE_SYSTEM_VERSION="${args["windows-sdk-version"]}"`);
-    genArgs.push(`-DIMPORT_HERMESC=${toolsBuildPath}\\ImportHermesc.cmake`);
-  } else if (platform === "arm64" || platform === "arm64ec") {
-    genArgs.push("-DHERMES_MSVC_ARM64=On");
-    genArgs.push(`-DIMPORT_HERMESC=${toolsBuildPath}\\ImportHermesc.cmake`);
-  }
-
-  if (platform === "arm64ec") {
-    process.env.CFLAGS = "-arm64EC";
-    process.env.CXXFLAGS = "-arm64EC";
-  }
-
-  const targets = ["libshared"]; //"hermes", "hermesc"
-  if (args["run-tests"]) {
-    targets.push("check-hermes");
-  }
-
-  runBuild({
-    ...buildParams,
-    appPlatform: args["app-platform"],
-    genArgs,
-    targets,
-  });
-}
-
-function getCommonArgs(buildParams) {
-  const genArgs = ["-G Ninja"];
-  const cmakeConfiguration = getCMakeConfiguration(buildParams);
-  genArgs.push(`-DCMAKE_BUILD_TYPE=${cmakeConfiguration}`);
-  genArgs.push("-DHERMESVM_PLATFORM_LOGGING=On");
-
-  if (args["file-version"]) {
-    genArgs.push(`-DHERMES_FILE_VERSION=${args["file-version"]}`);
-  }
-
-  return genArgs;
-}
-
-function getCMakeConfiguration({ configuration }) {
-  switch (configuration) {
-    case "release":
-      return "Release";
-    case "debug":
-    default:
-      return "FastDebug";
-  }
-}
-
 function runBuild(buildParams) {
   const { buildPath, genArgs, targets } = buildParams;
 
@@ -750,7 +753,8 @@ function getVCVarsAllBat() {
   return vcVarsAllBat;
 }
 
-function getVCVarsAllBatArgs({ platform }) {
+function getVCVarsAllBatArgs(buildParams) {
+  const { platform, isUwp } = buildParams;
   let vcArgs = "";
   switch (platform) {
     case "x64":
@@ -767,7 +771,7 @@ function getVCVarsAllBatArgs({ platform }) {
       vcArgs += "x64";
   }
 
-  if (args["app-platform"] === "uwp") {
+  if (isUwp) {
     vcArgs += " uwp";
   }
 
