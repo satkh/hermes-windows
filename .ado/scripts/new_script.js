@@ -143,10 +143,11 @@ function main() {
   // updateHermesVersion();
 
   const runParams = {
-    pkgPath: path.join(args["output-path"], "pkg"),
-    pkgStagingPath: path.join(args["output-path"], "pkg-staging"),
-    toolsPath: path.join(args["output-path"], "tools"),
     isUwp: args["app-platform"] === "uwp",
+    buildPath: path.join(args["output-path"], "build"),
+    toolsPath: path.join(args["output-path"], "tools"),
+    pkgStagingPath: path.join(args["output-path"], "pkg-staging"),
+    pkgPath: path.join(args["output-path"], "pkg"),
   };
 
   const platforms = Array.isArray(args.platform)
@@ -157,11 +158,14 @@ function main() {
     : [args.configuration];
   platforms.forEach((platform) => {
     configurations.forEach((configuration) => {
-      const buildParams = {
+      const configParams = {
         ...runParams,
         platform,
         configuration,
-        buildPath: getBuildPath({ platform, configuration }),
+      };
+      const buildParams = {
+        ...configParams,
+        buildPath: getBuildPath(configParams),
         targets: runParams.isUwp ? "libshared" : "",
         onBuildCompleted: copyBuiltFilesToPkgStaging,
       };
@@ -234,9 +238,9 @@ function main() {
 //   console.log(`Hermes version set to ${hermesVersion}`);
 // }
 
-function getBuildPath({ platform, configuration }) {
+function getBuildPath({ buildPath, platform, configuration }) {
   const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
-  return path.join(args["output-path"], "build", triplet);
+  return path.join(buildPath, triplet);
 }
 
 function cmakeClean(buildParams) {
