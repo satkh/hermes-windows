@@ -115,7 +115,7 @@ Options:
   --file-version          Version set in binary files (default: ${
     options["file-version"].default
   })
-  --windows-sdk-version   Windows SDK version E.g. "10.0.19041.0" (default: ${
+  --windows-sdk-version   Windows SDK version (e.g., "10.0.19041.0") (default: ${
     options["windows-sdk-version"].default
   })
   --fake-build            Replace binaries with fake files for script debugging (default: ${
