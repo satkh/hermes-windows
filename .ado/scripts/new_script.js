@@ -35,7 +35,7 @@ const options = {
   },
   "semantic-version": { type: "string", default: "0.0.0" },
   "file-version": { type: "string", default: "0.0.0.0" },
-  "windows-sdk-version": { type: "string", default: "10.0.19041.0" },
+  "windows-sdk-version": { type: "string", default: "" },
   "fake-build": { type: "boolean", default: false },
 };
 
