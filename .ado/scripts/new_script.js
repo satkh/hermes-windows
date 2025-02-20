@@ -308,7 +308,7 @@ function cleanAll() {
 }
 
 function cleanTools(runParams) {
-  deleteDir(buildParams.toolsPath);
+  deleteDir(runParams.toolsPath);
 }
 
 function cleanBuild(buildParams) {
@@ -411,26 +411,25 @@ function cmakeBuildHermesCompiler(buildParams) {
 function runCMakeCommand(command, buildParams) {
   const { platform, buildPath } = buildParams;
 
-  const savedCFlags = process.env.CFLAGS;
-  const savedCXXFlags = process.env.CXXFLAGS;
+  const env = { ...process.env };
   if (platform === "arm64ec") {
-    process.env.CFLAGS = "-arm64EC";
-    process.env.CXXFLAGS = "-arm64EC";
+    env.CFLAGS = "-arm64EC";
+    env.CXXFLAGS = "-arm64EC";
   }
 
   ensureDir(buildPath);
   const originalCwd = process.cwd();
   process.chdir(buildPath);
+  console.log(`Changed CWD to: ${buildPath}`);
   try {
     const vsCommand =
       `"${vcVarsAllBat}" ${getVCVarsAllBatArgs(buildParams)}` +
       ` && ${command} 2>&1`;
     console.log(`Run command: ${vsCommand}`);
-    execSync(vsCommand, { stdio: "inherit" });
+    execSync(vsCommand, { stdio: "inherit", env });
   } finally {
     process.chdir(originalCwd);
-    process.env.CFLAGS = savedCFlags;
-    process.env.CXXFLAGS = savedCXXFlags;
+    console.log(`Changed CWD back to: ${originalCwd}`);
   }
 }
 
