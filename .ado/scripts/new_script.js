@@ -34,11 +34,7 @@ const options = {
   "clean-build": { type: "boolean", default: false },
   "clean-tools": { type: "boolean", default: false },
   "clean-pkg": { type: "boolean", default: false },
-  "app-platform": {
-    type: "string",
-    default: "win32",
-    validSet: ["win32", "uwp"],
-  },
+  uwp: { type: "boolean", default: false },
   platform: {
     type: "string",
     multiple: true,
@@ -97,9 +93,9 @@ Options:
   --clean-pkg             Delete NuGet pkg and pkg-staging folders (default: ${
     options["clean-pkg"].default
   })
-  --app-platform          Application platform (default: ${
-    options["app-platform"].default
-  }) [valid values: ${options["app-platform"].validSet.join(", ")}]
+  --uwp                   Should we build for UWP or Win32? (default: ${
+    options.uwp.default
+  })
   --platform              Target platform(s) (default: ${options.platform.default.join(
     ", "
   )}) [valid values: ${options.platform.validSet.join(", ")}]
@@ -168,7 +164,7 @@ function main() {
   console.log(`          clean-build: ${args["clean-build"]}`);
   console.log(`          clean-tools: ${args["clean-tools"]}`);
   console.log(`            clean-pkg: ${args["clean-pkg"]}`);
-  console.log(`         app-platform: ${args["app-platform"]}`);
+  console.log(`                  uwp: ${args.uwp}`);
   console.log(`             platform: ${args.platform}`);
   console.log(`        configuration: ${args.configuration}`);
   console.log(`          output-path: ${args["output-path"]}`);
@@ -187,7 +183,7 @@ function main() {
   }
 
   const runParams = {
-    isUwp: args["app-platform"] === "uwp",
+    isUwp: args.uwp,
     buildPath: path.join(args["output-path"], "build"),
     toolsPath: path.join(args["output-path"], "tools"),
     pkgStagingPath: path.join(args["output-path"], "pkg-staging"),
@@ -298,9 +294,13 @@ function updateHermesVersion() {
   console.log(`Hermes version set to ${hermesVersion}`);
 }
 
-function getBuildPath({ buildPath, platform, configuration }) {
-  const triplet = `${args["app-platform"]}-${platform}-${configuration}`;
+function getBuildPath({ isUwp, buildPath, platform, configuration }) {
+  const triplet = `${getAppPlatformName(isUwp)}-${platform}-${configuration}`;
   return path.join(buildPath, triplet);
+}
+
+function getAppPlatformName(isUwp) {
+  return isUwp ? "uwp" : "win32";
 }
 
 function cleanAll() {
@@ -478,13 +478,13 @@ function createFakeBinFile(targetPath, fileName) {
 }
 
 function ensureStagingPaths(buildParams) {
-  const { platform, configuration } = buildParams;
+  const { isUwp, platform, configuration } = buildParams;
 
   const dllStagingPath = path.join(
     buildParams.pkgStagingPath,
     "lib",
     "native",
-    args["app-platform"],
+    getAppPlatformName(isUwp),
     configuration,
     platform
   );
