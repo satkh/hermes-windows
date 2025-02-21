@@ -245,7 +245,7 @@ function main() {
   });
 
   if (args.pack) {
-    packNuGet();
+    packNuGet(runParams);
   }
 
   const elapsedTime = new Date() - startTime;
@@ -456,13 +456,14 @@ function copyFakeFilesToPkgStaging(buildParams) {
   createFakeBinFile(dllStagingPath, "hermes.lib");
   createFakeBinFile(dllStagingPath, "hermes.pdb");
 
-  if (!buildParams.isUwp) {
+  if (!buildParams.isUwp && !buildParams.platform !== "arm64ec") {
     createFakeBinFile(toolsStagingPath, "hermes.exe");
     createFakeBinFile(toolsStagingPath, "hermesc.exe");
   }
 }
 
 function copyFile(fileName, sourcePath, targetPath) {
+  ensureDir(targetPath);
   fs.copyFileSync(
     path.join(sourcePath, fileName),
     path.join(targetPath, fileName)
@@ -501,154 +502,74 @@ function ensureStagingPaths(buildParams) {
   return { dllStagingPath, toolsStagingPath };
 }
 
-function packNuGet() {
-  ensureDir(
-    path.join(args["output-path"], "lib", "native", "win32", "release")
-  );
-  ensureDir(path.join(args["output-path"], "lib", "native", "uwp", "release"));
+function packNuGet(runParams) {
+  const { pkgStagingPath, pkgPath } = runParams;
 
-  ensureDir(
-    path.join(args["output-path"], "build", "native", "include", "jsi")
-  );
-  fs.cpSync(
-    path.join(args["sources-path"], "API", "jsi", "jsi"),
-    path.join(args["output-path"], "build", "native", "include", "jsi"),
-    { recursive: true }
-  );
+  const hermesApiPath = path.join(sourcesPath, "API");
+  const stagingBuildNativePath = path.join(pkgStagingPath, "build", "native");
+  const stagingIncludePath = path.join(stagingBuildNativePath, "include");
 
-  ensureDir(
-    path.join(args["output-path"], "build", "native", "include", "node-api")
+  // Copy jsi headers
+  const stagingJsiPath = path.join(stagingIncludePath, "jsi");
+  ensureDir(stagingJsiPath);
+  fs.cpSync(path.join(hermesApiPath, "jsi", "jsi"), stagingJsiPath, {
+    recursive: true,
+  });
+
+  // Copy node-api headers
+  const hermesSharedApiPath = path.join(hermesApiPath, "hermes_shared");
+  const hermesNodeApiPath = path.join(hermesSharedApiPath, "node-api");
+  const stagingNodeApiPath = path.join(stagingIncludePath, "node-api");
+  const stagingHermesApiPath = path.join(stagingIncludePath, "hermes");
+  ensureDir(stagingNodeApiPath);
+  copyFile("js_native_api.h", hermesNodeApiPath, stagingNodeApiPath);
+  copyFile("js_native_api_types.h", hermesNodeApiPath, stagingNodeApiPath);
+  copyFile("js_runtime_api.h", hermesNodeApiPath, stagingNodeApiPath);
+  ensureDir(stagingHermesApiPath);
+  copyFile("hermes_api.h", hermesSharedApiPath, stagingHermesApiPath);
+
+  // Copy license files
+  const nugetSourcePath = path.join(sourcesPath, ".ado", "Nuget");
+  const stagingLicensePath = path.join(pkgStagingPath, "license");
+  ensureDir(stagingLicensePath);
+  copyFile("LICENSE", sourcesPath, stagingLicensePath);
+  copyFile("NOTICE.txt", nugetSourcePath, stagingLicensePath);
+
+  // Copy MSBuild files
+  ensureDir(path.join(pkgStagingPath, "build", "native"));
+  copyFile(
+    "Microsoft.JavaScript.Hermes.props",
+    nugetSourcePath,
+    stagingBuildNativePath
   );
-  fs.copyFileSync(
-    path.join(
-      sourcesPath,
-      "API",
-      "hermes_shared",
-      "node-api",
-      "js_native_api.h"
-    ),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "include",
-      "node-api",
-      "js_native_api.h"
-    )
+  copyFile(
+    "Microsoft.JavaScript.Hermes.targets",
+    nugetSourcePath,
+    stagingBuildNativePath
   );
-  fs.copyFileSync(
-    path.join(
-      sourcesPath,
-      "API",
-      "hermes_shared",
-      "node-api",
-      "js_native_api_types.h"
-    ),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "include",
-      "node-api",
-      "js_native_api_types.h"
-    )
-  );
-  fs.copyFileSync(
-    path.join(
-      sourcesPath,
-      "API",
-      "hermes_shared",
-      "node-api",
-      "js_runtime_api.h"
-    ),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "include",
-      "node-api",
-      "js_runtime_api.h"
-    )
+  copyFile(
+    "Microsoft.JavaScript.Hermes.nuspec",
+    nugetSourcePath,
+    pkgStagingPath
   );
 
-  ensureDir(
-    path.join(args["output-path"], "build", "native", "include", "hermes")
-  );
-  fs.copyFileSync(
-    path.join(args["sources-path"], "API", "hermes_shared", "hermes_api.h"),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "include",
-      "hermes",
-      "hermes_api.h"
-    )
-  );
-
-  ensureDir(path.join(args["output-path"], "license"));
-  fs.copyFileSync(
-    path.join(args["sources-path"], "LICENSE"),
-    path.join(args["output-path"], "license", "LICENSE")
-  );
-  fs.copyFileSync(
-    path.join(args["sources-path"], ".ado", "Nuget", "NOTICE.txt"),
-    path.join(args["output-path"], "license", "NOTICE.txt")
-  );
-  fs.copyFileSync(
-    path.join(
-      args["sources-path"],
-      ".ado",
-      "Nuget",
-      "Microsoft.JavaScript.Hermes.props"
-    ),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "Microsoft.JavaScript.Hermes.props"
-    )
-  );
-  fs.copyFileSync(
-    path.join(
-      args["sources-path"],
-      ".ado",
-      "Nuget",
-      "Microsoft.JavaScript.Hermes.targets"
-    ),
-    path.join(
-      args["output-path"],
-      "build",
-      "native",
-      "Microsoft.JavaScript.Hermes.targets"
-    )
-  );
-  fs.copyFileSync(
-    path.join(
-      args["sources-path"],
-      ".ado",
-      "Nuget",
-      "Microsoft.JavaScript.Hermes.nuspec"
-    ),
-    path.join(args["output-path"], "Microsoft.JavaScript.Hermes.nuspec")
-  );
-
-  if (!fs.existsSync(path.join(args["output-path"], "lib", "uap"))) {
-    fs.mkdirSync(path.join(args["output-path"], "lib", "uap"));
-    fs.writeFileSync(path.join(args["output-path"], "lib", "uap", "_._"), "");
+  // Copy UAP tag file
+  const stagingUapPath = path.join(pkgStagingPath, "lib", "uap");
+  if (!fs.existsSync(stagingUapPath)) {
+    ensureDir(stagingUapPath);
+    fs.writeFileSync(path.join(stagingUapPath, "_._"), "");
   }
 
-  const pkgPath = path.join(args["output-path"], "pkg");
   ensureDir(pkgPath);
 
-  const packageVersion = args["release-version"];
+  const packageVersion = args["semantic-version"];
   const repoUrl = "https://github.com/microsoft/hermes-windows";
   const repoBranch = execSync("git rev-parse --abbrev-ref HEAD")
     .toString()
     .trim();
   const repoCommit = execSync("git rev-parse HEAD").toString().trim();
   const baseProperties =
-    `nugetroot=${args["output-path"]}` +
+    `nugetroot=${pkgStagingPath}` +
     `;version=${packageVersion}` +
     `;repoUrl=${repoUrl}` +
     `;repoBranch=${repoBranch}` +
@@ -657,16 +578,16 @@ function packNuGet() {
   const fatPackageProperties = `${baseProperties};fat_suffix=.Fat;exclude_bin_files=*.txt`;
 
   const nugetPackBaseCmd = `nuget pack "${path.join(
-    args["output-path"],
+    pkgStagingPath,
     "Microsoft.JavaScript.Hermes.nuspec"
   )}" -OutputDirectory "${pkgPath}" -NoDefaultExcludes`;
   const nugetPackCmd = `${nugetPackBaseCmd} -Properties "${packageProperties}"`;
   console.log(`Run command: ${nugetPackCmd}`);
-  execSync(nugetPackCmd);
+  execSync(nugetPackCmd, { stdio: "inherit" });
 
   const fatNugetPackCmd = `${nugetPackBaseCmd} -Properties "${fatPackageProperties}"`;
   console.log(`Run command: ${fatNugetPackCmd}`);
-  execSync(fatNugetPackCmd);
+  execSync(fatNugetPackCmd, { stdio: "inherit" });
 }
 
 function getVCVarsAllBat() {
