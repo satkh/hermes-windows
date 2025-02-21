@@ -93,6 +93,14 @@ extends:
           value: ${{ parameters.MustPublish }}
 
         steps:
+        - task: UseNode@1
+          displayName: Use Node.js 22.x
+          inputs:
+            version: 22.x
+
+        - script: node --version
+          displayName: Show Node.js version
+
         - script: node .ado\scripts\setVersionNumber.js
           name: setVersions # For output variable prefix
           displayName: Compute version numbers
@@ -116,9 +124,9 @@ extends:
             value: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
           # To fake building hermes for faster debugging
           - name: fakeBuild
-            value: true
+            value: false
           - name: fakeBuildArg
-            value: --fake-build
+            value: --no-fake-build
 
           templateContext:
             outputs:
