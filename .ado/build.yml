@@ -133,7 +133,7 @@ extends:
               --platform ${{ MatrixEntry.TargetCPU }}
               --configuration release
               ${{ MatrixEntry.BuildUWP }}
-              --sematic-version "$(semanticVersion)"
+              --semantic-version "$(semanticVersion)"
               --file-version "$(fileVersion)"
               $(fakeBuildArg)
             displayName: Build binaries
@@ -236,7 +236,7 @@ extends:
             --output-path $(Build.StagingDirectory)\out
             --no-build
             --pack
-            --sematic-version "$(semanticVersion)"
+            --semantic-version "$(semanticVersion)"
             --file-version "$(fileVersion)"
 
         # Sign the NuGet packages only for CI builds.
