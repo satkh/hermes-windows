@@ -385,8 +385,10 @@ function cmakeTest(buildParams) {
 }
 
 function cmakeBuildHermesCompiler(buildParams) {
-  const { toolsPath, isUwp } = buildParams;
-  if (!isUwp) {
+  const { toolsPath, isUwp, platform } = buildParams;
+
+  // Only build hermesc for UWP and ARM64/ARM64EC builds
+  if (!isUwp && !platform.startsWith("arm64")) {
     return;
   }
 
