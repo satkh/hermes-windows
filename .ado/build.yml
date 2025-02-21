@@ -127,6 +127,11 @@ extends:
               targetPath: $(Build.StagingDirectory)\out\pkg-staging
 
           steps:
+          - task: UseNode@1
+            displayName: Use Node.js 22.x
+            inputs:
+              version: 22.x
+
           - script: node --version
             displayName: Show Node.js version
 
@@ -220,6 +225,14 @@ extends:
             artifactName: published-packages
 
         steps:
+        - task: UseNode@1
+          displayName: Use Node.js 22.x
+          inputs:
+            version: 22.x
+
+        - script: node --version
+          displayName: Show Node.js version
+
         # The substitution tags in the nuspec require that we use at least nuget 4.6.
         - task: NuGetToolInstaller@0
           inputs:
