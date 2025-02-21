@@ -127,6 +127,9 @@ extends:
               targetPath: $(Build.StagingDirectory)\out\pkg-staging
 
           steps:
+          - script: node --version
+            displayName: Show Node.js version
+
           - script: >
               node .ado\scripts\build.js
               --output-path $(Build.StagingDirectory)\out
