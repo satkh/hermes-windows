@@ -118,10 +118,7 @@ extends:
           - name: fakeBuild
             value: true
           - name: fakeBuildArg
-            ${{ if eq(variables.fakeBuild, true) }}:
-              value: --fake-build
-            ${{ else }}:
-              value: --no-fake-build
+            value: --fake-build
 
           templateContext:
             outputs:
@@ -132,13 +129,13 @@ extends:
           steps:
           - script: >
               node .ado\scripts\build.js
-                --output-path $(Build.StagingDirectory)\out
-                --platform ${{ MatrixEntry.TargetCPU }}
-                --configuration release
-                ${{ MatrixEntry.BuildUWP }}
-                --sematic-version "$(semanticVersion)"
-                --file-version "$(fileVersion)"
-                $(fakeBuildArg)
+              --output-path $(Build.StagingDirectory)\out
+              --platform ${{ MatrixEntry.TargetCPU }}
+              --configuration release
+              ${{ MatrixEntry.BuildUWP }}
+              --sematic-version "$(semanticVersion)"
+              --file-version "$(fileVersion)"
+              $(fakeBuildArg)
             displayName: Build binaries
 
           - script: echo TODO - Add Tests here
@@ -236,11 +233,11 @@ extends:
         # Create NuGet packages.
         - script: >
             node .ado\scripts\build.js
-              --output-path $(Build.StagingDirectory)\out
-              --no-build
-              --pack
-              --sematic-version "$(semanticVersion)"
-              --file-version "$(fileVersion)"
+            --output-path $(Build.StagingDirectory)\out
+            --no-build
+            --pack
+            --sematic-version "$(semanticVersion)"
+            --file-version "$(fileVersion)"
 
         # Sign the NuGet packages only for CI builds.
         - ${{ if parameters.MustPublish }}:
