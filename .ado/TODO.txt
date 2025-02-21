@@ -1,7 +1,6 @@
-- Do not change source files when build locally
 - Implement correct NuGet package contents
 - Implement running unit tests
-- Use JavaScript?
+- Set github tags after successful CI builds
 
 - Implement Release pipeline
 
