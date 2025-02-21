@@ -274,17 +274,13 @@ function updateHermesVersion() {
     hermesVersion = args["file-version"];
   }
 
-  const cmakeListsPath = path.join(args["sources-path"], "CMakeLists.txt");
+  const cmakeListsPath = path.join(sourcesPath, "CMakeLists.txt");
   const cmakeContent = fs
     .readFileSync(cmakeListsPath, "utf8")
-    .replace(/VERSION .*/, `VERSION ${hermesVersion}`);
+    .replace("VERSION 0.12.0", `VERSION ${hermesVersion}`);
   fs.writeFileSync(cmakeListsPath, cmakeContent);
 
-  const packageJsonPath = path.join(
-    args["sources-path"],
-    "npm",
-    "package.json"
-  );
+  const packageJsonPath = path.join(sourcesPath, "npm", "package.json");
   const packageContent = fs
     .readFileSync(packageJsonPath, "utf8")
     .replace(/"version": ".*",/, `"version": "${args["semantic-version"]}",`);
