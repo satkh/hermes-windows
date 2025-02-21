@@ -1,6 +1,7 @@
 - Implement correct NuGet package contents
 - Implement running unit tests
 - Set github tags after successful CI builds
+- Add copyright to DLLs
 
 - Implement Release pipeline
 

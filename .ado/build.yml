@@ -243,6 +243,7 @@ extends:
 
         # The substitution tags in the nuspec require that we use at least nuget 4.6.
         - task: NuGetToolInstaller@0
+          displayName: Install NuGet tools
           inputs:
             versionSpec: ">=4.6.0"
 
@@ -262,6 +263,7 @@ extends:
             --pack
             --semantic-version "$(semanticVersion)"
             --file-version "$(fileVersion)"
+          displayName: Create NuGet packages
 
         # Sign the NuGet packages only for CI builds.
         - ${{ if parameters.MustPublish }}:
