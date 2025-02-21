@@ -171,9 +171,9 @@ extends:
                 folderPath: $(Build.StagingDirectory)\out\pkg-staging
                 # Recursively finds files matching these patterns:
                 pattern: |
-                  $(Build.StagingDirectory)\out\pkg-staging\**\hermes.dll
-                  $(Build.StagingDirectory)\out\pkg-staging\**\hermes.exe
-                  $(Build.StagingDirectory)\out\pkg-staging\**\hermesc.exe
+                  **\hermes.dll
+                  **\hermes.exe
+                  **\hermesc.exe
                 useMinimatch: true
                 signConfigType: inlineSignParams
                 inlineOperation: |
@@ -276,7 +276,7 @@ extends:
               authSignCertName: 'OGX-JSHost-Sign3'
               folderPath: $(Build.StagingDirectory)\out\pkg
               pattern: |
-                $(Build.StagingDirectory)\out\pkg\Microsoft.JavaScript.Hermes.*.nupkg
+                Microsoft.JavaScript.Hermes.*.nupkg
               useMinimatch: true
               signConfigType: inlineSignParams
               inlineOperation: |
