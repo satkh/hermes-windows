@@ -214,7 +214,7 @@ function main() {
       const buildParams = {
         ...configParams,
         buildPath: getBuildPath(configParams),
-        targets: runParams.isUwp ? "libshared" : "",
+        targets: isCrossPlatformBuild(configParams) ? "libshared" : "",
         onBuildCompleted: copyBuiltFilesToPkgStaging,
       };
       console.log(
@@ -372,8 +372,8 @@ function cmakeBuild(buildParams) {
 }
 
 function cmakeTest(buildParams) {
-  if (buildParams.isUwp) {
-    console.log("Skip testing for UWP");
+  if (isCrossPlatformBuild(buildParams)) {
+    console.log("Skip testing for UWP and ARM64/ARM64EC builds");
     return;
   }
 
@@ -385,10 +385,10 @@ function cmakeTest(buildParams) {
 }
 
 function cmakeBuildHermesCompiler(buildParams) {
-  const { toolsPath, isUwp, platform } = buildParams;
+  const { toolsPath } = buildParams;
 
-  // Only build hermesc for UWP and ARM64/ARM64EC builds
-  if (!isUwp && !platform.startsWith("arm64")) {
+  // Only build hermesc explicitly for UWP and ARM64/ARM64EC.
+  if (!isCrossPlatformBuild(buildParams)) {
     return;
   }
 
@@ -431,6 +431,12 @@ function runCMakeCommand(command, buildParams) {
   }
 }
 
+function isCrossPlatformBuild({ isUwp, platform }) {
+  // Return true if we either build for UWP and ARM64/ARM64EC.
+  // In these cases we must build x64 tools and cannot run unit tests.
+  return isUwp || platform.startsWith("arm64");
+}
+
 function copyBuiltFilesToPkgStaging(buildParams) {
   const { buildPath } = buildParams;
   const { dllStagingPath, toolsStagingPath } = ensureStagingPaths(buildParams);
@@ -440,7 +446,7 @@ function copyBuiltFilesToPkgStaging(buildParams) {
   copyFile("hermes.lib", dllSourcePath, dllStagingPath);
   copyFile("hermes.pdb", dllSourcePath, dllStagingPath);
 
-  if (!buildParams.isUwp) {
+  if (!isCrossPlatformBuild(buildParams)) {
     const toolsSourcePath = path.join(buildPath, "bin");
     copyFile("hermes.exe", toolsSourcePath, toolsStagingPath);
     copyFile("hermesc.exe", toolsSourcePath, toolsStagingPath);
@@ -454,7 +460,7 @@ function copyFakeFilesToPkgStaging(buildParams) {
   createFakeBinFile(dllStagingPath, "hermes.lib");
   createFakeBinFile(dllStagingPath, "hermes.pdb");
 
-  if (!buildParams.isUwp && !buildParams.platform !== "arm64ec") {
+  if (!isCrossPlatformBuild(buildParams)) {
     createFakeBinFile(toolsStagingPath, "hermes.exe");
     createFakeBinFile(toolsStagingPath, "hermesc.exe");
   }
