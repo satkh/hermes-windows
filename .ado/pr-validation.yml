@@ -11,7 +11,7 @@ pr:
   - rnw/*
 
 extends:
-  template: build-and-pack.yml@self
+  template: build.yml@self
   parameters:
     # Make sure that the PR builds do not publish signed packages.
     MustPublish: false

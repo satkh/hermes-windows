@@ -15,28 +15,28 @@ parameters:
   default:
   - Name: uwp_x64
     TargetCPU: x64
-    BuildAppPlatform: uwp
+    BuildUWP: --uwp
   - Name: uwp_x86
     TargetCPU: x86
-    BuildAppPlatform: uwp
+    BuildUWP: --uwp
   - Name: uwp_arm64
     TargetCPU: arm64
-    BuildAppPlatform: uwp
+    BuildUWP: --uwp
   - Name: win32_x64
     TargetCPU: x64
-    BuildAppPlatform: win32
+    BuildUWP: --no-uwp
   - Name: win32_x86
     TargetCPU: x86
-    BuildAppPlatform: win32
+    BuildUWP: --no-uwp
   - Name: win32_arm64
     TargetCPU: arm64
-    BuildAppPlatform: win32
+    BuildUWP: --no-uwp
     # ARM64 "Emulation Compatible" is to run ARM64 Hermes DLL in a x64 app
     # on Windows ARM64 in emulation mode.
     # See: https://learn.microsoft.com/en-us/windows/arm/arm64ec
   - Name: win32_arm64ec 
     TargetCPU: arm64ec
-    BuildAppPlatform: win32
+    BuildUWP: --no-uwp
 
 resources:
   repositories:
@@ -57,8 +57,8 @@ extends:
     sdl:
       binskim:
         analyzeTarget: |
-          $(Build.StagingDirectory)\build\**\*.dll
-          $(Build.StagingDirectory)\build\**\*.exe
+          $(Build.StagingDirectory)\out\pkg-staging\**\*.dll
+          $(Build.StagingDirectory)\out\pkg-staging\**\*.exe
       componentgovernance:
         ignoreDirectories: $(Build.SourcesDirectory)\website
       eslint:
@@ -110,39 +110,42 @@ extends:
           timeoutInMinutes: 120
 
           variables:
-            semanticVersion: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
-            fileVersion: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
-            # To fake building hermes for faster debugging
-            fakeBuild: false
+          - name: semanticVersion
+            value: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
+          - name: fileVersion
+            value: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
+          # To fake building hermes for faster debugging
+          - name: fakeBuild
+            value: true
+          - name: fakeBuildArg
+            ${{ if eq(variables.fakeBuild, true) }}:
+              value: --fake-build
+            ${{ else }}:
+              value: --no-fake-build
 
           templateContext:
             outputs:
             - output: pipelineArtifact
               artifactName: ${{ MatrixEntry.Name }}
-              targetPath: $(Build.StagingDirectory)\build
+              targetPath: $(Build.StagingDirectory)\out\pkg-staging
 
           steps:
-          - task: PowerShell@2
+          - script: >
+              node .ado\scripts\build.js
+                --output-path $(Build.StagingDirectory)\out
+                --platform ${{ MatrixEntry.TargetCPU }}
+                --configuration release
+                ${{ MatrixEntry.BuildUWP }}
+                --sematic-version "$(semanticVersion)"
+                --file-version "$(fileVersion)"
+                $(fakeBuildArg)
             displayName: Build binaries
-            inputs:
-              targetType: filePath
-              filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
-              arguments:
-                -SourcesPath:$(Build.SourcesDirectory)
-                -OutputPath:$(Build.StagingDirectory)\build
-                -Platform:${{ MatrixEntry.TargetCPU }}
-                -Configuration:release
-                -AppPlatform:${{ MatrixEntry.BuildAppPlatform }}
-                -ReleaseVersion:"$(semanticVersion)"
-                -FileVersion:"$(fileVersion)"
-                -NoPack
-                -FakeBuild:$$(fakeBuild) 
 
           - script: echo TODO - Add Tests here
             displayName: '[Test] - To be Added via bug #77'
 
           # Sign and publish symbols only for the CI builds.
-          - ${{ if and(eq(parameters.MustPublish, true), ne(variables.FakeBuild, true)) }}:
+          - ${{ if and(eq(parameters.MustPublish, true), ne(variables.fakeBuild, true)) }}:
             - task: SFP.build-tasks.custom-build-task-1.EsrpCodeSigning@5
               displayName: CodeSign Binaries
               inputs:
@@ -152,12 +155,12 @@ extends:
                 authAKVName: 'OGX-JSHost-KV'
                 authCertName: 'OGX-JSHost-Auth4'
                 authSignCertName: 'OGX-JSHost-Sign3'
-                folderPath: $(Build.StagingDirectory)\build
+                folderPath: $(Build.StagingDirectory)\out\pkg-staging
                 # Recursively finds files matching these patterns:
                 pattern: |
-                  $(Build.StagingDirectory)\build\**\hermes.dll
-                  $(Build.StagingDirectory)\build\**\hermes.exe
-                  $(Build.StagingDirectory)\build\**\hermesc.exe
+                  $(Build.StagingDirectory)\out\pkg-staging\**\hermes.dll
+                  $(Build.StagingDirectory)\out\pkg-staging\**\hermes.exe
+                  $(Build.StagingDirectory)\out\pkg-staging\**\hermesc.exe
                 useMinimatch: true
                 signConfigType: inlineSignParams
                 inlineOperation: |
@@ -188,7 +191,7 @@ extends:
             - task: PublishSymbols@2
               displayName: Publish symbols
               inputs:
-                SearchPattern: $(Build.StagingDirectory)\build\**\*.pdb
+                SearchPattern: $(Build.StagingDirectory)\out\pkg-staging\**\*.pdb
                 SymbolServerType: TeamServices
                 UseNetCoreClientTool: true
 
@@ -205,13 +208,15 @@ extends:
           - Build_Hermes_${{ MatrixEntry.Name }}
 
         variables:
-          semanticVersion: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
-          fileVersion: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
+        - name: semanticVersion
+          value: $[ dependencies.Set_Versions.outputs['setVersions.semanticVersion'] ]
+        - name: fileVersion
+          value: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
 
         templateContext:
           outputs:
           - output: pipelineArtifact
-            targetPath: $(Build.StagingDirectory)\build\pkg
+            targetPath: $(Build.StagingDirectory)\out\pkg
             artifactName: published-packages
 
         steps:
@@ -226,20 +231,16 @@ extends:
             displayName: Download ${{ MatrixEntry.Name }} hermes artifacts
             inputs:
               artifact: ${{ MatrixEntry.Name }}
-              path: $(Build.StagingDirectory)\build
+              path: $(Build.StagingDirectory)\out\pkg-staging
 
         # Create NuGet packages.
-        - task: PowerShell@2
-          displayName: Create NuGet packages
-          inputs:
-            targetType: filePath
-            filePath: $(Build.SourcesDirectory)\.ado\scripts\cibuild.ps1
-            arguments:
-              -SourcesPath:$(Build.SourcesDirectory)
-              -OutputPath:$(Build.StagingDirectory)\build
-              -ReleaseVersion:"$(semanticVersion)"
-              -FileVersion:"$(fileVersion)"
-              -NoBuild
+        - script: >
+            node .ado\scripts\build.js
+              --output-path $(Build.StagingDirectory)\out
+              --no-build
+              --pack
+              --sematic-version "$(semanticVersion)"
+              --file-version "$(fileVersion)"
 
         # Sign the NuGet packages only for CI builds.
         - ${{ if parameters.MustPublish }}:
@@ -252,9 +253,9 @@ extends:
               authAKVName: 'OGX-JSHost-KV'
               authCertName: 'OGX-JSHost-Auth4'
               authSignCertName: 'OGX-JSHost-Sign3'
-              folderPath: $(Build.StagingDirectory)\build\pkg
+              folderPath: $(Build.StagingDirectory)\out\pkg
               pattern: |
-                $(Build.StagingDirectory)\build\pkg\Microsoft.JavaScript.Hermes.*.nupkg
+                $(Build.StagingDirectory)\out\pkg\Microsoft.JavaScript.Hermes.*.nupkg
               useMinimatch: true
               signConfigType: inlineSignParams
               inlineOperation: |

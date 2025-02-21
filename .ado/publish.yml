@@ -22,6 +22,6 @@ variables:
     value: production,externalfacing
 
 extends:
-  template: build-and-pack.yml@self
+  template: build.yml@self
   parameters:
     MustPublish: true
