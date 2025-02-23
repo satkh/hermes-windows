@@ -127,9 +127,9 @@ extends:
             value: $[ dependencies.Set_Versions.outputs['setVersions.fileVersion'] ]
           # To fake building hermes for faster debugging
           - name: fakeBuild
-            value: false
+            value: true
           - name: fakeBuildArg
-            value: --no-fake-build
+            value: --fake-build
 
           templateContext:
             outputs:
