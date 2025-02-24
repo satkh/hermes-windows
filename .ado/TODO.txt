@@ -5,5 +5,9 @@
 
 - Implement Release pipeline
 
+- Implement source indexing for PDB files
+- Implement Delta repo
+- Implement tagging the releases
+
 - Fix CMake warinings
 - Fix PlatformIntl tests
