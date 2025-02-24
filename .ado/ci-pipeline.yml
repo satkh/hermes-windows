@@ -21,7 +21,7 @@ variables:
     value: production,externalfacing
 
 extends:
-  template: build.yml@self
+  template: build-template.yml@self
   parameters:
     # CI builds must publish the binaries and packages.
     MustPublish: true
