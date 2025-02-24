@@ -4,7 +4,7 @@
 #
 
 trigger: none
-name: $(Date:yyyyMMdd).$(Rev:r)
+name: Release $(Date:yyyyMMdd).$(Rev:r)
 
 resources:
   pipelines:
