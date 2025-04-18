@@ -68,7 +68,6 @@ TEST_P(JSITestExt, ArrayBufferTest) {
   EXPECT_EQ(buffer[1], 5678);
 }
 
-#if JSI_VERSION >= 9
 TEST_P(JSITestExt, ExternalArrayBufferTest) {
   struct FixedBuffer : MutableBuffer {
     size_t size() const override {
@@ -297,7 +296,6 @@ TEST_P(JSITestExt, HostObjectAsParentTest) {
       eval("var subClass = {__proto__: ho}; subClass.prop1 == 10;").getBool());
 }
 
-#if JSI_VERSION >= 7
 TEST_P(JSITestExt, NativeStateTest) {
   class C : public facebook::jsi::NativeState {
    public:
@@ -343,9 +341,7 @@ TEST_P(JSITestExt, NativeStateTest) {
   // point to local variables. Otherwise ASAN will complain.
   eval("gc()");
 }
-#endif
 
-#if JSI_VERSION >= 5
 TEST_P(JSITestExt, PropNameIDFromSymbol) {
   auto strProp = PropNameID::forAscii(rt, "a");
   auto secretProp = PropNameID::forSymbol(
@@ -360,7 +356,6 @@ TEST_P(JSITestExt, PropNameIDFromSymbol) {
   EXPECT_EQ(x.getProperty(rt, secretProp).getString(rt).utf8(rt), "secret");
   EXPECT_EQ(x.getProperty(rt, globalProp).getString(rt).utf8(rt), "global");
 }
-#endif
 
 TEST_P(JSITestExt, HasComputedTest) {
   // The only use of JSObject::hasComputed() is in HermesRuntimeImpl,
@@ -394,9 +389,7 @@ TEST_P(JSITestExt, GlobalObjectTest) {
   eval("gc()");
   EXPECT_EQ(eval("f(10)").getNumber(), 15);
 }
-#endif
 
-#if JSI_VERSION >= 8
 TEST_P(JSITestExt, BigIntJSI) {
   Function bigintCtor = rt.global().getPropertyAsFunction(rt, "BigInt");
   auto BigInt = [&](const char* v) { return bigintCtor.call(rt, eval(v)); };
@@ -525,7 +518,6 @@ TEST_P(JSITestExt, BigIntJSITruncation) {
   EXPECT_EQ(toUint64(b), lossy(~0ull));
   EXPECT_EQ(toInt64(b), lossy(~0ull));
 }
-#endif
 
 TEST_P(JSITestExt, NativeExceptionDoesNotUseGlobalError) {
   Function alwaysThrows = Function::createFromHostFunction(
