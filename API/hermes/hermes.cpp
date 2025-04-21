@@ -520,9 +520,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
       return vm::HermesValue::encodeUntrustedNumberValue(value.getNumber());
     } else if (
         value.isSymbol() ||
-#if JSI_VERSION >= 6
         value.isBigInt() ||
-#endif
         value.isString() || value.isObject()) {
       return phv(value);
     } else {
@@ -542,9 +540,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
           vm::HermesValue::encodeUntrustedNumberValue(value.getNumber()));
     } else if (
         value.isSymbol() ||
-#if JSI_VERSION >= 6
         value.isBigInt() ||
-#endif
         value.isString() || value.isObject()) {
       return vm::Handle<vm::HermesValue>(&phv(value));
     } else {
@@ -563,10 +559,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
       return hv.getDouble();
     } else if (hv.isSymbol()) {
       return add<jsi::Symbol>(hv);
-#if JSI_VERSION >= 6
     } else if (hv.isBigInt()) {
       return add<jsi::BigInt>(hv);
-#endif
     } else if (hv.isString()) {
       return add<jsi::String>(hv);
     } else if (hv.isObject()) {
@@ -592,12 +586,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Value evaluateJavaScript(
       const std::shared_ptr<const jsi::Buffer> &buffer,
       const std::string &sourceURL) override;
-#if JSI_VERSION >= 12
   void queueMicrotask(const jsi::Function &callback) override;
-#endif
-#if JSI_VERSION >= 4
   bool drainMicrotasks(int maxMicrotasksHint = -1) override;
-#endif
   jsi::Object global() override;
 
   std::string description() override;
@@ -605,9 +595,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Instrumentation &instrumentation() override;
 
   PointerValue *cloneSymbol(const Runtime::PointerValue *pv) override;
-#if JSI_VERSION >= 6
   PointerValue *cloneBigInt(const Runtime::PointerValue *pv) override;
-#endif
   PointerValue *cloneString(const Runtime::PointerValue *pv) override;
   PointerValue *cloneObject(const Runtime::PointerValue *pv) override;
   PointerValue *clonePropNameID(const Runtime::PointerValue *pv) override;
@@ -620,22 +608,18 @@ class HermesRuntimeImpl final : public HermesRuntime,
       const char16_t *utf16,
       size_t length) override;
   jsi::PropNameID createPropNameIDFromString(const jsi::String &str) override;
-#if JSI_VERSION >= 5
   jsi::PropNameID createPropNameIDFromSymbol(const jsi::Symbol &sym) override;
-#endif
   std::string utf8(const jsi::PropNameID &) override;
   bool compare(const jsi::PropNameID &, const jsi::PropNameID &) override;
 
   std::string symbolToString(const jsi::Symbol &) override;
 
-#if JSI_VERSION >= 8
   jsi::BigInt createBigIntFromInt64(int64_t) override;
   jsi::BigInt createBigIntFromUint64(uint64_t) override;
   bool bigintIsInt64(const jsi::BigInt &) override;
   bool bigintIsUint64(const jsi::BigInt &) override;
   uint64_t truncate(const jsi::BigInt &) override;
   jsi::String bigintToString(const jsi::BigInt &, int) override;
-#endif
 
   jsi::String createStringFromAscii(const char *str, size_t length) override;
   jsi::String createStringFromUtf8(const uint8_t *utf8, size_t length) override;
@@ -656,10 +640,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
       void *ctx,
       void (*cb)(void *ctx, bool ascii, const void *data, size_t num)) override;
 
-#if JSI_VERSION >= 2
   jsi::Value createValueFromJsonUtf8(const uint8_t *json, size_t length)
       override;
-#endif
 
   jsi::Object createObject() override;
   jsi::Object createObject(std::shared_ptr<jsi::HostObject> ho) override;
@@ -667,13 +649,11 @@ class HermesRuntimeImpl final : public HermesRuntime,
   jsi::Object createObjectWithPrototype(const jsi::Value &prototype) override;
   jsi::HostFunctionType &getHostFunction(const jsi::Function &) override;
 
-#if JSI_VERSION >= 7
   bool hasNativeState(const jsi::Object &) override;
   std::shared_ptr<jsi::NativeState> getNativeState(
       const jsi::Object &) override;
   void setNativeState(const jsi::Object &, std::shared_ptr<jsi::NativeState>)
       override;
-#endif
   void setExternalMemoryPressure(const jsi::Object &, size_t) override;
 
   jsi::Value getProperty(const jsi::Object &, const jsi::PropNameID &name)
@@ -705,10 +685,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
       JSI_NO_CONST_3 JSI_CONST_10 jsi::WeakObject &wo) override;
 
   jsi::Array createArray(size_t length) override;
-#if JSI_VERSION >= 9
   jsi::ArrayBuffer createArrayBuffer(
       std::shared_ptr<jsi::MutableBuffer> buffer) override;
-#endif
   size_t size(const jsi::Array &) override;
   size_t size(const jsi::ArrayBuffer &) override;
   uint8_t *data(const jsi::ArrayBuffer &) override;
@@ -733,9 +711,7 @@ class HermesRuntimeImpl final : public HermesRuntime,
       size_t count) override;
 
   bool strictEquals(const jsi::Symbol &a, const jsi::Symbol &b) const override;
-#if JSI_VERSION >= 6
   bool strictEquals(const jsi::BigInt &a, const jsi::BigInt &b) const override;
-#endif
   bool strictEquals(const jsi::String &a, const jsi::String &b) const override;
   bool strictEquals(const jsi::Object &a, const jsi::Object &b) const override;
 
@@ -1642,7 +1618,6 @@ jsi::Value HermesRuntimeImpl::evaluateJavaScript(
   return evaluateJavaScriptWithSourceMap(buffer, nullptr, sourceURL);
 }
 
-#if JSI_VERSION >= 12
 void HermesRuntimeImpl::queueMicrotask(const jsi::Function &callback) {
   if (LLVM_UNLIKELY(!runtime_.hasMicrotaskQueue())) {
     throw jsi::JSINativeException(
@@ -1653,9 +1628,7 @@ void HermesRuntimeImpl::queueMicrotask(const jsi::Function &callback) {
       vm::Handle<vm::Callable>::vmcast(&phv(callback));
   runtime_.enqueueJob(handle.get());
 }
-#endif
 
-#if JSI_VERSION >= 4
 bool HermesRuntimeImpl::drainMicrotasks(int maxMicrotasksHint) {
   if (runtime_.hasMicrotaskQueue()) {
     checkStatus(runtime_.drainJobs());
@@ -1665,7 +1638,6 @@ bool HermesRuntimeImpl::drainMicrotasks(int maxMicrotasksHint) {
   runtime_.clearKeptObjects();
   return true;
 }
-#endif
 
 jsi::Object HermesRuntimeImpl::global() {
   return add<jsi::Object>(runtime_.getGlobal().getHermesValue());
@@ -1697,12 +1669,10 @@ jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneSymbol(
   return clone(pv);
 }
 
-#if JSI_VERSION >= 6
 jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneBigInt(
     const Runtime::PointerValue *pv) {
   return clone(pv);
 }
-#endif
 
 jsi::Runtime::PointerValue *HermesRuntimeImpl::cloneString(
     const Runtime::PointerValue *pv) {
@@ -1770,12 +1740,10 @@ jsi::PropNameID HermesRuntimeImpl::createPropNameIDFromString(
   return add<jsi::PropNameID>(cr->getHermesValue());
 }
 
-#if JSI_VERSION >= 5
 jsi::PropNameID HermesRuntimeImpl::createPropNameIDFromSymbol(
     const jsi::Symbol &sym) {
   return add<jsi::PropNameID>(phv(sym));
 }
-#endif
 
 std::string HermesRuntimeImpl::utf8(const jsi::PropNameID &sym) {
   vm::GCScope gcScope(runtime_);
@@ -1823,7 +1791,6 @@ std::string HermesRuntimeImpl::symbolToString(const jsi::Symbol &sym) {
       vm::StringPrimitive::createStringView(runtime_, *res));
 }
 
-#if JSI_VERSION >= 8
 jsi::BigInt HermesRuntimeImpl::createBigIntFromInt64(int64_t value) {
   vm::GCScope gcScope(runtime_);
   vm::CallResult<vm::HermesValue> res =
@@ -1874,7 +1841,6 @@ jsi::String HermesRuntimeImpl::bigintToString(
   checkStatus(toStringRes.getStatus());
   return add<jsi::String>(*toStringRes);
 }
-#endif
 
 jsi::String HermesRuntimeImpl::createStringFromAscii(
     const char *str,
@@ -1959,7 +1925,6 @@ void HermesRuntimeImpl::getPropNameIdData(
   }
 }
 
-#if JSI_VERSION >= 2
 jsi::Value HermesRuntimeImpl::createValueFromJsonUtf8(
     const uint8_t *json,
     size_t length) {
@@ -1970,7 +1935,6 @@ jsi::Value HermesRuntimeImpl::createValueFromJsonUtf8(
   checkStatus(res.getStatus());
   return valueFromHermesValue(*res);
 }
-#endif
 
 jsi::Object HermesRuntimeImpl::createObject() {
   vm::GCScope gcScope(runtime_);
@@ -2007,7 +1971,6 @@ std::shared_ptr<jsi::HostObject> HermesRuntimeImpl::getHostObject(
   return static_cast<const JsiProxy *>(proxy)->ho_;
 }
 
-#if JSI_VERSION >= 7
 bool HermesRuntimeImpl::hasNativeState(const jsi::Object &obj) {
   vm::GCScope gcScope(runtime_);
   auto h = handle(obj);
@@ -2078,7 +2041,6 @@ std::shared_ptr<jsi::NativeState> HermesRuntimeImpl::getNativeState(
   return std::shared_ptr(
       *reinterpret_cast<std::shared_ptr<jsi::NativeState> *>(ns->context()));
 }
-#endif
 
 void HermesRuntimeImpl::setExternalMemoryPressure(
     const jsi::Object &obj,
@@ -2322,7 +2284,6 @@ jsi::Array HermesRuntimeImpl::createArray(size_t length) {
   return add<jsi::Array>(result->getHermesValue());
 }
 
-#if JSI_VERSION >= 9
 jsi::ArrayBuffer HermesRuntimeImpl::createArrayBuffer(
     std::shared_ptr<jsi::MutableBuffer> buffer) {
   vm::GCScope gcScope(runtime_);
@@ -2341,7 +2302,6 @@ jsi::ArrayBuffer HermesRuntimeImpl::createArrayBuffer(
   checkStatus(res);
   return add<jsi::ArrayBuffer>(buf.getHermesValue());
 }
-#endif
 
 size_t HermesRuntimeImpl::size(const jsi::Array &arr) {
   return vm::JSArray::getLength(*arrayHandle(arr), runtime_);
@@ -2539,12 +2499,10 @@ bool HermesRuntimeImpl::strictEquals(const jsi::Symbol &a, const jsi::Symbol &b)
   return phv(a).getSymbol() == phv(b).getSymbol();
 }
 
-#if JSI_VERSION >= 6
 bool HermesRuntimeImpl::strictEquals(const jsi::BigInt &a, const jsi::BigInt &b)
     const {
   return phv(a).getBigInt()->compare(phv(b).getBigInt()) == 0;
 }
-#endif
 
 bool HermesRuntimeImpl::strictEquals(const jsi::String &a, const jsi::String &b)
     const {
