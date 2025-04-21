@@ -519,9 +519,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
     } else if (value.isNumber()) {
       return vm::HermesValue::encodeUntrustedNumberValue(value.getNumber());
     } else if (
-        value.isSymbol() ||
-        value.isBigInt() ||
-        value.isString() || value.isObject()) {
+        value.isSymbol() || value.isBigInt() || value.isString() ||
+        value.isObject()) {
       return phv(value);
     } else {
       llvm_unreachable("unknown value kind");
@@ -539,9 +538,8 @@ class HermesRuntimeImpl final : public HermesRuntime,
       return runtime_.makeHandle(
           vm::HermesValue::encodeUntrustedNumberValue(value.getNumber()));
     } else if (
-        value.isSymbol() ||
-        value.isBigInt() ||
-        value.isString() || value.isObject()) {
+        value.isSymbol() || value.isBigInt() || value.isString() ||
+        value.isObject()) {
       return vm::Handle<vm::HermesValue>(&phv(value));
     } else {
       llvm_unreachable("unknown value kind");
