@@ -140,9 +140,7 @@ class HERMES_EXPORT HermesRuntime : public jsi::Runtime {
   /// static throughout that object's (or string's, or PropNameID's)
   /// lifetime.
   virtual uint64_t getUniqueID(const jsi::Object &o) const = 0;
-#if JSI_VERSION >= 8
   virtual uint64_t getUniqueID(const jsi::BigInt &s) const = 0;
-#endif
   virtual uint64_t getUniqueID(const jsi::String &s) const = 0;
   virtual uint64_t getUniqueID(const jsi::PropNameID &pni) const = 0;
   virtual uint64_t getUniqueID(const jsi::Symbol &sym) const = 0;
